@@ -1,225 +1,66 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>商品标签打印程序</title><style>
-*{box-sizing:border-box}body{margin:0;background:#eef1f5;color:#18212e;font:15px Arial,'Microsoft YaHei',sans-serif}header{padding:22px;background:#172b42;color:white}h1{margin:0;font-size:23px}main{max-width:1100px;margin:auto;padding:20px}.panel{background:white;border-radius:10px;padding:20px;margin-bottom:18px}h2{font-size:18px;margin:0 0 16px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}label{display:block}input,textarea,select{width:100%;padding:9px;margin-top:5px;border:1px solid #bbc5cf;border-radius:5px;font:inherit}button,.button{display:inline-block;background:#174d81;color:white;padding:10px 15px;border:0;border-radius:5px;cursor:pointer;margin:10px 6px 0 0;text-decoration:none}button.secondary{background:#64748b}.tip{font-size:13px;line-height:1.6;color:#526173}.tablewrap{overflow:auto;max-height:350px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid #ddd}td input{min-width:95px}td:first-child input{width:auto}#status{white-space:pre-wrap;color:#a32916}.sheet{display:flex;flex-wrap:wrap;justify-content:center;gap:16px;color:black}.tag{width:80mm;height:60mm;background:white;padding:4mm 2.5mm;box-shadow:0 1px 8px #0002;display:flex;flex-direction:column;justify-content:center;gap:2mm;flex-shrink:0}.name,.spec{font-size:11pt;line-height:calc(1em + 2mm);font-weight:700;overflow-wrap:anywhere;white-space:pre-wrap}.name{text-align:justify;text-align-last:center}.spec{text-align:center;font-size:15pt}.loc{font:900 54pt/1 Arial,sans-serif;text-align:center;white-space:nowrap}.sku{font:700 18pt/1.1 Arial,sans-serif;text-align:center;white-space:nowrap}.bad{outline:2px solid #d00}@media(max-width:600px){.grid{grid-template-columns:1fr}main{padding:10px}}@page{size:80mm 60mm;margin:0}@media print{html,body{margin:0;padding:0;background:white}header,main>.panel{display:none}main{margin:0;padding:0;max-width:none}.sheet{display:block}.tag{box-shadow:none;margin:0;height:59.8mm;overflow:hidden;break-after:auto;page-break-after:auto;break-inside:avoid;page-break-inside:avoid;outline:none}.tag+.tag{break-before:page;page-break-before:always}}
-.drop-zone{display:block;border:2px dashed #91a9bf;border-radius:10px;padding:22px;text-align:center;background:#f5f9fd;cursor:pointer;margin:12px 0}.drop-zone.active{background:#e1efff;border-color:#174d81}.drop-zone input{max-width:420px}.drop-zone strong{display:block;margin-bottom:8px}.picked-file{display:flex;align-items:center;gap:10px}.picked-file[hidden]{display:none}[hidden]{display:none!important}
-header{padding:18px 24px;background:#18334c}.header-sub{margin:7px 0 0;font-size:13px;color:#c6d6e5}main{max-width:1160px;padding:16px 20px}.app-nav{position:sticky;top:0;z-index:20;display:flex;gap:6px;padding:8px;background:#eef1f5;border-bottom:1px solid #d5dfe7;margin-bottom:16px}.app-nav button{margin:0;background:transparent;color:#465c70;padding:11px 22px;border-radius:8px;font-weight:700}.app-nav button.active{background:#174d81;color:white;box-shadow:0 2px 5px #174d8122}.panel{padding:18px;margin-bottom:12px;border:1px solid #dce3ea;box-shadow:0 2px 7px #21394b06}.drop-zone{padding:14px;margin:10px 0}.grid{gap:10px 18px}.grid textarea{min-height:66px}.grid input{padding:8px}.tablewrap{max-height:290px}.tip{margin:8px 0}.panel h2{margin-bottom:12px}#statusPanel{padding:10px 16px;background:#f8fafc}#statusPanel details summary{cursor:pointer;color:#51687b;font-size:13px}#status:empty{display:none}#sheet{max-height:330px;overflow:auto;padding:12px;background:#dce4eb;border-radius:10px;align-items:flex-start}#sheet:empty{display:none}#catalogResults{max-height:340px}#catalogResults button{margin-top:6px;font-size:13px}.preview-heading{font-size:14px;color:#526779;margin:12px 0 6px}.workspace-panel[hidden]{display:none!important}@media(max-width:600px){main{padding:10px}.app-nav button{flex:1;padding:10px 8px}.panel{padding:14px}#sheet{justify-content:flex-start}.header-sub{font-size:12px}}@media print{.app-nav,.preview-heading{display:none!important}#sheet{max-height:none!important;overflow:visible!important;padding:0!important;background:white!important;border-radius:0}}
-
-.settings-layout{display:grid;grid-template-columns:minmax(300px,1fr) minmax(280px,1fr);gap:24px;align-items:start}.label-diagram{width:100%;display:block;background:#f4f7fb;border-radius:12px}.element-guide{display:grid;gap:10px}.element-guide article{border:1px solid #dce4ed;border-left:4px solid var(--accent);border-radius:8px;padding:12px 14px;background:#fff}.element-guide h3{margin:0 0 5px;font-size:15px}.element-guide p{margin:0;font-size:13px;color:#526779;line-height:1.65}.element-guide strong{color:#18212e}.measure-chips{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.measure-chips span{padding:7px 11px;background:#edf3fa;color:#174d81;border-radius:6px;font-size:13px}.settings-table{font-size:13px}.settings-table th{width:40%}.app-nav{flex-wrap:wrap}@media(max-width:760px){.settings-layout{grid-template-columns:1fr}.app-nav button{padding:10px 12px}}
- .sku-barcode{display:flex;justify-content:center;align-items:center;height:8mm;flex-shrink:0}.sku-barcode svg{display:block;flex-shrink:0}.tag{gap:1mm}.tag>div{flex-shrink:0}
-.sync-card{padding:15px 18px;background:#f0f6fc;border:1px solid #c6d9eb;border-radius:9px}.sync-card>strong{color:#174d81}.sync-actions{display:flex;flex-wrap:wrap;gap:8px}.sync-actions button{margin:4px 0}.sync-actions button:disabled,button:disabled{opacity:.55;cursor:wait}.manual-catalog{margin-top:14px}.manual-catalog>summary{cursor:pointer;color:#51687b;font-size:13px}#catalogStatus{white-space:pre-wrap}#catalogInfo{padding:10px 0;border-bottom:1px solid #e0e7ed}
-.version-chip{font-size:11px;color:#607689;float:right}
-.sku-row{display:flex;align-items:center;justify-content:flex-start;gap:1mm;width:100%}.sku-row .sku{flex-shrink:0;text-align:left}.sku-text{display:inline-block;white-space:nowrap;transform-origin:left center}.sku-prefix,.sku-value{font:inherit;letter-spacing:0;word-spacing:0;padding:0}.sku-value{margin-left:-.4mm}
-
-
-.app-status-panel{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;background:#f0f6fc;border-color:#c6d9eb}.app-status-panel .sync-card{padding:0;background:transparent;border:0;border-radius:0}.app-status-panel .sync-card>strong{font-size:18px}.app-status-panel #catalogInfo{padding:0;margin-bottom:0;border:0}.batch-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.batch-heading h2{margin:0}.batch-heading button{margin:0}#batchSource{margin:12px 0}@media print{.app-status-panel{display:none!important}}
-
-.catalog-cache-summary{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:16px;margin:16px 0}.catalog-cache-stat{min-width:0;padding:18px 20px;background:#fff;border:2px solid #8cb5da;border-radius:10px;box-shadow:0 3px 10px #174d8112}.catalog-cache-stat>span{display:block;font-size:15px;font-weight:700;color:#465c70;margin-bottom:10px}#catalogCount{font-size:44px;line-height:1.15;color:#174d81;font-variant-numeric:tabular-nums}.catalog-count-unit{font-size:18px;font-weight:700;color:#465c70}#catalogUpdated{display:block;font-size:28px;line-height:1.45;color:#174d81;overflow-wrap:anywhere}.single-product-search{margin-bottom:18px;padding:12px 14px;background:#f5f9fd;border:1px solid #dce4ed;border-radius:8px}.single-product-search>h3{margin:0;font-size:15px;font-weight:700;color:#174d81}#singlePanel input[readonly],#singlePanel textarea[readonly]{background:#f3f6f9;color:#465c70}.single-product-search label{margin-top:12px}@media(max-width:600px){.catalog-cache-summary{grid-template-columns:1fr;gap:10px}.catalog-cache-stat{padding:14px 16px}#catalogCount{font-size:38px}#catalogUpdated{font-size:24px}}
-
-</style><header><h1>商品标签打印程序 · 80 × 60毫米</h1><p class="header-sub">本地文件上传商品库 · 单个与批量标签打印</p></header><main><section class="panel app-status-panel" id="appStatusPanel" aria-label="本地商品库上传与状态"><div class="sync-card"><strong>商品库 · 本地文件上传</strong><span class="version-chip">云端版 1.1.14</span><div class="catalog-cache-summary" role="status" aria-live="polite"><div class="catalog-cache-stat"><span>商品库商品数量</span><div><strong id="catalogCount">—</strong><span class="catalog-count-unit"> 个</span></div></div><div class="catalog-cache-stat"><span>商品库更新时间</span><strong id="catalogUpdated">正在读取…</strong></div></div><p class="tip">商品库上传后固定保存，打开、刷新网页、搜索和打印均使用这份数据。只有重新上传文件并确认替换，才会更新商品库。</p><div class="sync-actions"><button id="catalogManualUpload" type="button" aria-controls="catalogManualPanel">本地上传文件</button></div><p id="catalogStatus" class="tip" role="status">正在读取本地缓存…</p><p id="catalogInfo" class="tip"></p><details class="manual-catalog" id="catalogManualPanel" open><summary>本地上传商品库（Excel / CSV）</summary><label class="drop-zone" id="catalogDrop" tabindex="0"><strong>拖拽商品库文件到这里，或点击选择</strong><span>支持Excel（.xlsx / .xls）和CSV</span><input id="catalogFile" type="file" accept=".xlsx,.xls,.csv"></label><div id="catalogPicked" hidden class="picked-file"><span id="catalogFilename"></span><button type="button" id="catalogClear" class="secondary" aria-label="移除已选择文件" title="移除文件">×</button></div><p class="tip">上传文件后，核对商品名称、SKU、规格和库位列，点击“确认并替换商品库”才会替换；取消或导入失败时保留原商品库。SKU请选择“SKU”列；其他电脑需各自上传文件。</p><div id="catalogMapping" hidden><label>选择工作表<select id="catalogTabs"></select></label><div class="grid" id="catalogFields"></div><button id="catalogApply">确认并替换商品库</button></div></details></div></section><nav class="app-nav" aria-label="功能导航"><button type="button" data-view="single" aria-controls="singlePanel">单个打印</button><button type="button" data-view="batch" aria-controls="batchPanel">批量打印</button><button type="button" data-view="settings" aria-controls="settingsPanel">标签说明</button></nav><section class="panel workspace-panel" id="singlePanel"><h2>单个商品</h2><div class="single-product-search"><h3>查找商品</h3><label>搜索商品名称、SKU或库位<input id="catalogSearch" placeholder="输入关键词，点击查询结果确认商品"></label><div id="catalogResults" class="tablewrap" hidden></div></div><p class="tip">查询后点击商品确认，才会显示商品信息；信息仅可查看，打印份数可调整。</p><div class="grid"><label>商品名称<textarea id="name" readonly></textarea></label><label>规格（选填）<textarea id="spec" readonly></textarea></label><label>库位<input id="loc" readonly value=""></label><label>SKU码（文字显示后六位，条码使用完整SKU）<input id="sku" readonly value=""></label><label>打印份数<input id="qty" type="number" min="1" max="500" value="1"></label></div><button id="singlePreview" disabled>预览单个商品</button><button id="singlePrint" disabled>打印单个商品</button><button id="singleImage" type="button" disabled>下载标签图片</button><p class="tip">图片按300dpi生成，包含完整SKU条码；多张图片打包为ZIP下载。</p></section><section class="panel workspace-panel" id="batchPanel"><div class="batch-heading"><h2>批量打印</h2><button id="catalogBatch" type="button" class="secondary">重新载入商品库</button></div><p id="batchSource" class="tip" role="status">正在读取商品库…</p><label>库位筛选（不限位数）<input id="locationFilter" placeholder="例如C、C56或C56-2；留空显示全部"></label><p class="tip">按输入内容匹配库位开头，不限位数。例如C56可匹配C56-2-2，C56-2可进一步缩小范围。筛选后仅预览、打印当前筛选范围内勾选的商品。</p><div class="tablewrap"><table><thead><tr><th><input type="checkbox" id="all">选择</th><th>商品名称</th><th>SKU码</th><th>规格</th><th>库位</th><th>份数</th></tr></thead><tbody id="rows"></tbody></table></div><button id="prevPage" class="secondary">上一页</button><span id="pageInfo"></span><button id="nextPage" class="secondary">下一页</button><br><button id="batchPreview">预览选中商品</button><button id="batchPrint" type="button">打印选中商品</button><button id="batchPdf" type="button">导出打印PDF</button><button id="batchImage" type="button">下载标签图片</button><button id="retryPrint" type="button" hidden>再次打开打印窗口</button><p id="batchStatus" role="status" style="white-space:pre-wrap;color:#a32916"></p><p id="count" class="tip"></p></section><section id="settingsPanel" class="panel workspace-panel" hidden><h2>标签设置说明</h2><p class="tip">当前模板的可视化说明。示意图仅用于标注参数，不会打印到标签上。</p><div class="measure-chips"><span>80 × 60 mm</span><span>白底黑字</span><span>整体垂直居中</span><span>元素间隔 1 mm</span></div><div class="settings-layout"><div><svg class="label-diagram" viewBox="0 0 1000 780" role="img" aria-label="80乘60毫米标签示意图：商品名称、规格、SKU文字和完整SKU条码、底部库位"><defs><marker id="dimArrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10" fill="#64748b"/></marker></defs><path d="M100 55H900" stroke="#64748b" marker-start="url(#dimArrow)" marker-end="url(#dimArrow)"/><text x="500" y="37" text-anchor="middle" fill="#526779" font-size="24">宽 80 mm</text><rect x="100" y="90" width="800" height="600" rx="4" fill="white" stroke="#94a3b8" stroke-width="2"/><path d="M55 90V690" stroke="#64748b" marker-start="url(#dimArrow)" marker-end="url(#dimArrow)"/><text x="30" y="390" transform="rotate(-90 30 390)" text-anchor="middle" fill="#526779" font-size="24">高 60 mm</text><rect x="125" y="130" width="750" height="540" fill="none" stroke="#cbd5e1" stroke-dasharray="10 8"/><rect x="125" y="187.5" width="750" height="60" rx="8" fill="#eff6ff" stroke="#3b82f6"/><text x="500" y="230.5" text-anchor="middle" font-size="39" font-weight="700">商品名称 · 11pt</text><rect x="125" y="257.5" width="750" height="70" rx="8" fill="#ecfdf5" stroke="#10b981"/><text x="500" y="312.5" text-anchor="middle" font-size="53" font-weight="700">规格：15pt</text><rect x="125" y="442.5" width="750" height="150" rx="8" fill="#fff7ed" stroke="#f97316"/><text x="500" y="562.5" text-anchor="middle" font-family="Arial,sans-serif" font-size="120" font-weight="900">C56-2-2</text><rect x="125" y="337.5" width="750" height="95" rx="8" fill="#f5f3ff" stroke="#8b5cf6"/><rect x="355" y="345" width="520" height="80" fill="white"/><rect x="384.545" y="345" width="5.909" height="80" fill="black"/><rect x="393.409" y="345" width="2.955" height="80" fill="black"/><rect x="402.273" y="345" width="8.864" height="80" fill="black"/><rect x="417.045" y="345" width="5.909" height="80" fill="black"/><rect x="428.864" y="345" width="2.955" height="80" fill="black"/><rect x="434.773" y="345" width="8.864" height="80" fill="black"/><rect x="449.545" y="345" width="2.955" height="80" fill="black"/><rect x="464.318" y="345" width="5.909" height="80" fill="black"/><rect x="476.136" y="345" width="2.955" height="80" fill="black"/><rect x="482.045" y="345" width="5.909" height="80" fill="black"/><rect x="496.818" y="345" width="2.955" height="80" fill="black"/><rect x="508.636" y="345" width="2.955" height="80" fill="black"/><rect x="514.545" y="345" width="2.955" height="80" fill="black"/><rect x="520.455" y="345" width="5.909" height="80" fill="black"/><rect x="538.182" y="345" width="2.955" height="80" fill="black"/><rect x="547.045" y="345" width="11.818" height="80" fill="black"/><rect x="561.818" y="345" width="2.955" height="80" fill="black"/><rect x="570.682" y="345" width="2.955" height="80" fill="black"/><rect x="579.545" y="345" width="2.955" height="80" fill="black"/><rect x="591.364" y="345" width="5.909" height="80" fill="black"/><rect x="600.227" y="345" width="2.955" height="80" fill="black"/><rect x="612.045" y="345" width="2.955" height="80" fill="black"/><rect x="623.864" y="345" width="11.818" height="80" fill="black"/><rect x="638.636" y="345" width="2.955" height="80" fill="black"/><rect x="644.545" y="345" width="5.909" height="80" fill="black"/><rect x="656.364" y="345" width="5.909" height="80" fill="black"/><rect x="668.182" y="345" width="5.909" height="80" fill="black"/><rect x="677.045" y="345" width="2.955" height="80" fill="black"/><rect x="685.909" y="345" width="5.909" height="80" fill="black"/><rect x="694.773" y="345" width="8.864" height="80" fill="black"/><rect x="709.545" y="345" width="2.955" height="80" fill="black"/><rect x="715.455" y="345" width="11.818" height="80" fill="black"/><rect x="730.227" y="345" width="8.864" height="80" fill="black"/><rect x="742.045" y="345" width="5.909" height="80" fill="black"/><rect x="753.864" y="345" width="8.864" height="80" fill="black"/><rect x="765.682" y="345" width="2.955" height="80" fill="black"/><rect x="774.545" y="345" width="11.818" height="80" fill="black"/><rect x="795.227" y="345" width="2.955" height="80" fill="black"/><rect x="801.136" y="345" width="2.955" height="80" fill="black"/><rect x="807.045" y="345" width="5.909" height="80" fill="black"/><rect x="821.818" y="345" width="8.864" height="80" fill="black"/><rect x="833.636" y="345" width="2.955" height="80" fill="black"/><rect x="839.545" y="345" width="5.909" height="80" fill="black"/><text x="125" y="406" text-anchor="start" font-family="Arial,sans-serif" font-size="64" font-weight="700" textLength="220" lengthAdjust="spacingAndGlyphs">SKU:902136</text><text x="500" y="724" text-anchor="middle" fill="#526779" font-size="22">左侧SKU＋后六位 · 右侧条码扫描完整SKU</text><text x="500" y="757" text-anchor="middle" fill="#526779" font-size="21">左右内边距 2.5mm · 上下内边距 4mm</text></svg><p class="tip">彩色框用于区分元素，实际标签无彩色框。文字高度和总留白随内容换行、库位缩放而变化。</p></div><div class="element-guide"><article style="--accent:#3b82f6"><h3>① 商品名称　<strong>11pt · 加粗700</strong></h3><p>完整显示，自动换行；两端对齐，最后一行居中。内部行高：11pt＋2mm，约16.67pt。</p></article><article style="--accent:#10b981"><h3>② 规格　<strong>15pt · 加粗700</strong></h3><p>位于商品名称下方，居中，显示“规格：”，保留手动换行。过长的行横向压缩；为空时整行隐藏。内部行高约20.67pt。</p></article><article style="--accent:#8b5cf6"><h3>③ SKU　<strong>18pt · 加粗700</strong></h3><p>规格下方左侧显示“SKU:”及后六位，前缀与后六位紧密连排，中间不插入空格；统一18pt、加粗700、不换行；与右侧条码垂直居中。文字行高19.8pt。空间不足时整组文字统一横向收紧，最低60%，条码保持52mm宽度。</p></article><article style="--accent:#8b5cf6"><h3>④ SKU条形码　<strong>Code 128 · 52 × 8mm</strong></h3><p>放在SKU文字右侧，与左侧SKU文字相隔1mm。扫码得到完整SKU，不截取后六位。整组保持同一行；超出可用宽度时提示调整。纯数字SKU采用紧凑编码，保留前导零；支持英文字母、数字和英文符号。条码固定宽52mm、高8mm；左右静区各10个模块，单个、批量打印和PDF均包含。编码过长，无法在52mm内保留至少0.25mm的模块宽度时提示修改。</p></article><article style="--accent:#f97316"><h3>⑤ 库位　<strong>54pt · 特粗900</strong></h3><p>位于标签最下面，居中，不加“库位：”，不换行。过长或标签高度不足时每次缩小0.5pt，最低16pt。行高为当前字号的1倍。</p></article><table class="settings-table"><tbody><tr><th>排列顺序</th><td>名称 → 规格 → SKU组（SKU＋后六位文字 → 完整条码）→ 库位</td></tr><tr><th>元素之间的间隔</th><td>统一1mm；与文字内部行高不同</td></tr><tr><th>上下留白</th><td>内容整体居中；内边距各4mm，内容过高时减为2.5mm</td></tr><tr><th>字体</th><td>Arial / 微软雅黑 / 系统可用字体</td></tr><tr><th>必填信息</th><td>商品名称、SKU、库位；规格选填</td></tr><tr><th>打印设置</th><td>每张独立一页，80×60mm、100%实际大小、无边距、关闭页眉页脚</td></tr></tbody></table></div></div></section><section class="panel" id="statusPanel"><details><summary>打印设置说明</summary><p class="tip">打印设置：80×60毫米纸张、100%实际大小、无边距，关闭页眉页脚。每张标签独立一页。需在连接标签打印机的电脑浏览器中打开。内容仅在本机处理。</p></details><p id="status" role="status"></p><button id="cancelImport" hidden type="button" class="secondary">取消导入</button></section><div class="preview-heading" id="previewHeading">标签预览</div><div class="sheet" id="sheet"></div></main><script>
-const $=id=>document.getElementById(id);let data=[],warnings='',currentView='single',batchCatalogRevision=null,selectedSingleProduct=null;const fields=['name','sku','spec','loc','qty'];
-function message(s){$('status').textContent=s;if($('batchStatus'))$('batchStatus').textContent=s}function qty(v){const n=Number(v||1);if(!Number.isInteger(n)||n<1||n>500)throw Error('打印份数必须为1至500的整数');return n}
-
-
-
-const locationPatterns=["BaBbBb","BbBaBb","BbBbBa","AbAbBc","AbAcBb","AcAbBb","AbBbAc","AbBcAb","AcBbAb","BbAbAc","BbAcAb","BcAbAb","AaBbCb","AbBaCb","AbBbCa","AaCbBb","AbCaBb","AbCbBa","BbCbAa","BbAaCb","BbAbCa","BaCbAb","BbCaAb","CaBaCa","CaAbBb","CbAaBb","CbAbBa","CaBbAb","CbBaAb","CbBbAa","BaBaBc","BaBcBa","BcBaBa","AaAcBc","AcAaBc","AcAcBa","AaBcAc","AcBaAc","AcBcAa","BaAcAc","BcAaAc","BcAcAa","AaBaCc","AaBcCa","AcBaCa","AaCaBc","AaCcBa","AcCaBa","CaCaBa","BaAcCa","BcAaCa","BaCaAc","BaCcAa","BaCaCa","CaAaBc","CaAcBa","CcAaBa","CaBaAc","CaBcAa","CcBaAa","CaDaAa","BbAdAa","DcAaAa","AaAbBd","AaAdBb","AbAaBd","AbAdBa","AdAaBb","AdAbBa","AaBbAd","AaBdAb","AbBaAd","AbBdAa","AdBaAb","AdBbAa","BdAbAa","BbAaAd","DaCaAa","BdAaAb","AcDaAa","AaAbDb","AbAaDb","AbAbDa","AaDbAb","AbDaAb","AbDbAa","DaAbAb","DbAaAb","DbAbAa","BaBaDa","BaDaBa","DaBaBa","AaAaDc","AaAcDa","AcAaDa","AaDaAc","AaDcAa","DaAaAc","DaAcAa","AaCaDa","AaDaCa","CaAaDa","DaAaCa","BaAdAb","BaAbAd","BaAbCb","BcCaAaB"];
-function code128Barcode(value,label,compactNumeric=false){
- const text=String(value??'').trim();
- if(!/^[\x20-\x7e]+$/.test(text))throw Error(label+'条形码支持英文字母、数字和英文符号，请检查'+label+'：'+text);
- let codes;
- // Encode numeric SKUs in pairs, without ever converting the whole SKU to a Number.
- if(compactNumeric&&/^\d{4,}$/.test(text)){
-  codes=[105];const end=text.length-text.length%2;
-  for(let i=0;i<end;i+=2)codes.push(Number(text.slice(i,i+2)));
-  if(end<text.length)codes.push(100,text.charCodeAt(end)-32);
- }else codes=[104,...Array.from(text,c=>c.charCodeAt(0)-32)];
- let check=codes[0];for(let i=1;i<codes.length;i++)check+=codes[i]*i;
- codes.push(check%103,106);let x=10;const bars=[];
- for(const code of codes)for(const c of locationPatterns[code]){const w=c.toLowerCase().charCodeAt(0)-96;if(c===c.toUpperCase())bars.push([x,w]);x+=w}
- const width=x+10,mm=52;
- if(width*.25>mm)throw Error(label+'过长，条形码无法在52mm内保持可扫描宽度：'+text);
- const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 '+width+' 32');svg.setAttribute('width',mm+'mm');svg.setAttribute('height','8mm');svg.setAttribute('role','img');svg.setAttribute('aria-label',label+'条形码：'+text);svg.setAttribute('data-value',text);svg.setAttribute('shape-rendering','crispEdges');svg.setAttribute('preserveAspectRatio','none');
- const bg=document.createElementNS(ns,'rect');bg.setAttribute('width',width);bg.setAttribute('height','32');bg.setAttribute('fill','white');svg.append(bg);
- for(const [pos,w] of bars){const rect=document.createElementNS(ns,'rect');rect.setAttribute('x',pos);rect.setAttribute('width',w);rect.setAttribute('height','32');rect.setAttribute('fill','black');svg.append(rect)}return svg;
-}
-function skuBarcode(value){return code128Barcode(value,'SKU',true)}
-
-function tag(r){
- const t=document.createElement('div');t.className='tag';
- for(const k of ['name','spec','loc']){
-  const e=document.createElement('div');e.className=k;
-  if(k==='spec'&&!String(r.spec??'').trim())e.hidden=true;
-  e.textContent=k==='spec'?'规格：'+r.spec:r[k];t.append(e);
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>商品标签打印 · 团队云端版</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#eef1f5;color:#18212e;font:15px Arial,'Microsoft YaHei',sans-serif}header{padding:22px 24px;background:#18334c;color:white}h1{margin:0;font-size:23px}header p{margin:8px 0 0;color:#c6d6e5;font-size:13px}main{max-width:760px;margin:32px auto;padding:0 20px}.panel{padding:26px;background:white;border:1px solid #dce3ea;border-radius:12px;margin-bottom:18px}h2{margin:0 0 14px;font-size:20px}p{line-height:1.7}a.button,button{display:inline-block;border:0;border-radius:7px;background:#174d81;color:white;padding:12px 18px;margin:10px 8px 0 0;text-decoration:none;cursor:pointer;font:inherit;font-weight:700}.secondary{background:#64748b}button:disabled{opacity:.5;cursor:default}.tip{color:#526173;font-size:13px}[hidden]{display:none!important}.steps{padding-left:22px;line-height:1.9}#status{white-space:pre-wrap}#legacySummary{font-weight:700;color:#174d81}@media(max-width:600px){main{margin:18px auto;padding:0 12px}.panel{padding:20px}h1{font-size:20px}}
+</style>
+</head>
+<body>
+<header><h1>商品标签打印 · 80 × 60毫米</h1><p>团队云端商品库 · 单个与批量打印 · 标签图片下载</p></header>
+<main>
+<section class="panel">
+<h2>进入团队云端版</h2>
+<p>管理员上传一次商品库，获准访问的团队成员即可查询、打印和下载标签图片。商品库只有在管理员重新上传并确认替换后才会更新。</p>
+<p class="tip">请使用获准访问的账号登录。首次使用时，由管理员上传商品库文件。</p>
+<a class="button" id="openCloud" href="https://label-print-80x60.w792294944.chatgpt.site/printer.html">打开团队打印网页</a>
+<p id="status" class="tip" role="status">正在检查当前设备的旧商品库…</p>
+</section>
+<section class="panel" id="legacyPanel" hidden>
+<h2>迁移当前设备的旧商品库</h2>
+<p id="legacySummary"></p>
+<ol class="steps">
+<li>点击下面的按钮，将旧商品库导出为JSON文件。</li>
+<li>打开团队打印网页，使用管理员账号登录。</li>
+<li>上传导出的JSON，核对列对应关系，再确认保存到云端。</li>
+</ol>
+<button id="downloadLegacy" type="button">导出旧商品库JSON</button>
+<p class="tip">也可以在云端直接上传原Excel或CSV文件。导出操作会保留当前设备的旧商品库。</p>
+</section>
+<noscript><section class="panel"><p>请点击“打开团队打印网页”进入。若需导出当前设备的旧商品库，请启用浏览器JavaScript。</p></section></noscript>
+</main>
+<script>
+const cloudOrigin='https://label-print-80x60.w792294944.chatgpt.site';
+const view=['single','batch','settings'].includes(location.hash.slice(1))?location.hash:'#single';
+const cloudUrl=cloudOrigin+'/printer.html'+view;
+document.getElementById('openCloud').href=cloudUrl;
+let legacyCatalog=null;
+try{
+ const saved=JSON.parse(localStorage.getItem('label-product-catalog-v1')||'null');
+ if(saved&&Array.isArray(saved.rows)&&saved.rows.length&&saved.rows.every(row=>row&&['name','sku','spec','loc'].every(key=>typeof row[key]==='string'))){
+  legacyCatalog=saved;
+  document.getElementById('legacyPanel').hidden=false;
+  document.getElementById('legacySummary').textContent='当前设备保存了 '+saved.rows.length.toLocaleString('zh-CN')+' 个商品，可由管理员迁移到云端。';
+  document.getElementById('status').textContent='发现旧商品库。请先导出，或使用原商品库文件在团队版重新上传。';
+ }else{
+  document.getElementById('status').textContent='正在前往团队云端版…';
+  location.replace(cloudUrl);
  }
- const row=document.createElement('div');row.className='sku-row';
- const barcode=document.createElement('div');barcode.className='sku-barcode';barcode.append(skuBarcode(r.sku));
- const sku=document.createElement('div');sku.className='sku';
- const prefix=document.createElement('span');prefix.className='sku-prefix';prefix.textContent='SKU:';
- const value=document.createElement('span');value.className='sku-value';value.textContent=String(r.sku).trim().slice(-6);
- const text=document.createElement('span');text.className='sku-text';text.append(prefix,value);sku.append(text);row.append(sku,barcode);t.insertBefore(row,t.querySelector('.loc'));return t;
+}catch{
+ document.getElementById('status').textContent='当前设备的旧商品库无法读取。请打开团队版，使用原Excel或CSV文件重新上传。';
 }
-function fit(t){const tooTall=()=>{const style=getComputedStyle(t),children=Array.from(t.children).filter(e=>!e.hidden);const content=children.reduce((h,e)=>h+e.getBoundingClientRect().height,0)+Math.max(0,children.length-1)*parseFloat(style.rowGap)+parseFloat(style.paddingTop)+parseFloat(style.paddingBottom);return content>t.getBoundingClientRect().height+.25};const skuRow=t.querySelector('.sku-row'),sku=skuRow.querySelector('.sku'),skuText=sku.querySelector('.sku-text');sku.style.width='';skuText.style.transform='';const available=skuRow.clientWidth-skuRow.querySelector('.sku-barcode').getBoundingClientRect().width-parseFloat(getComputedStyle(skuRow).columnGap),natural=skuText.getBoundingClientRect().width,skuScale=Math.min(1,Math.max(0,available)/natural);sku.style.width=Math.min(natural,Math.max(0,available))+'px';skuText.style.transform='scaleX('+skuScale+')';const loc=t.querySelector('.loc');let n=54;loc.style.fontSize=n+'pt';while(loc.scrollWidth>loc.clientWidth&&n>16){loc.style.fontSize=(n-=.5)+'pt'}const spec=t.querySelector('.spec');spec.style.fontSize='15pt';const lines=spec.hidden?[]:spec.textContent.split('\n');spec.replaceChildren();for(const line of lines){const row=document.createElement('div');row.style.whiteSpace='nowrap';const span=document.createElement('span');span.style.display='inline-block';span.textContent=line;row.append(span);spec.append(row);span.style.transform='scaleX('+Math.min(1,spec.clientWidth/span.getBoundingClientRect().width)+')'}t.querySelector('.name').style.fontSize='11pt';t.style.paddingTop='4mm';t.style.paddingBottom='4mm';if(tooTall()){t.style.paddingTop='2.5mm';t.style.paddingBottom='2.5mm'}while(tooTall()&&n>16){loc.style.fontSize=(n-=.5)+'pt'}const bad=skuScale<.60||tooTall()||loc.scrollWidth>loc.clientWidth+1||skuRow.scrollWidth>skuRow.clientWidth+1;t.classList.toggle('bad',bad);return !bad}
-
-function render(items){$('retryPrint').hidden=true;const selected=items.map(r=>({...r}));let total=0;for(let i=0;i<selected.length;i++){const r=selected[i],missing=[];for(const key of ['name','sku','loc'])if(!String(r[key]??'').trim())missing.push(({name:'商品名称',sku:'SKU',spec:'规格',loc:'库位'})[key]);if(missing.length)throw Error('第'+(i+1)+'个选中商品（'+(r.name||r.sku||'未命名')+'）缺少：'+missing.join('、')+'。请补全后打印。');r.qty=qty(r.qty);total+=r.qty;if(total>1000)throw Error('当前选中'+total+'张，一次最多1000张，请减少选择或份数')}if(!total)throw Error('当前筛选范围没有勾选商品，请先勾选再打印。');const sheet=$('sheet');sheet.replaceChildren();const originals=selected.map(r=>{const t=tag(r);sheet.append(t);return t});let ok=true;originals.forEach(t=>{if(!fit(t))ok=false});if(!ok){$('sheet').scrollIntoView({behavior:'smooth',block:'start'});throw Error('部分标签内容超出80×60毫米（预览红框）。请调整规格换行或商品名称后打印。')}const fragment=document.createDocumentFragment();selected.forEach((r,i)=>{fragment.append(originals[i]);for(let n=1;n<r.qty;n++)fragment.append(originals[i].cloneNode(true))});sheet.replaceChildren(fragment);$('retryPrint').hidden=false;message('已生成 '+total+' 张标签。'+(warnings?'\n'+warnings:''))}
-
-let printSequence=0;function requestLabelPrint(){const labels=$('sheet').querySelectorAll('.tag');if(!labels.length){message('请先生成标签再打印。');return}const old=document.getElementById('labelPrintFrame');if(old)old.remove();const frame=document.createElement('iframe');frame.id='labelPrintFrame';frame.title='标签打印页面';frame.style.cssText='position:fixed;left:-10000px;top:0;width:80mm;height:60mm;border:0;';const seq=++printSequence;const css=Array.from(document.querySelectorAll('style')).map(e=>e.textContent).join('\n');frame.onload=()=>{if(seq!==printSequence)return;const target=frame.contentWindow;if(!target){message('打印页面创建失败，请重试。');return}target.addEventListener('afterprint',()=>{message('本次打印窗口已关闭，可以再次点击打印。')},{once:true});try{target.focus();target.print();message('已请求打印 '+labels.length+' 张标签。打印或取消后，可再次点击打印。')}catch(error){message('打开打印窗口失败：'+error.message)}};frame.srcdoc='<!doctype html><html><head><meta charset="utf-8"><style>'+css+'\nhtml,body{margin:0!important;padding:0!important;background:white!important}.sheet{display:block!important;margin:0!important;padding:0!important;border:0!important;gap:0!important}.tag{box-shadow:none!important;margin:0!important;height:59.8mm!important;overflow:hidden;break-after:auto;page-break-after:auto;break-inside:avoid;page-break-inside:avoid}.tag+.tag{break-before:page;page-break-before:always}@page{size:80mm 60mm;margin:0}</style></head><body class="login-open"><div class="sheet">'+$('sheet').innerHTML+'</div></body></html>';document.body.append(frame);message('正在准备第 '+seq+' 次打印…')}
-
-function action(batch,doPrint){try{if(!batch&&!selectedSingleProduct)throw Error('请先查询并点击商品确认，再预览或打印。');message('正在生成标签…');const items=batch?filteredData().filter(r=>r.selected):[{...selectedSingleProduct,qty:$('qty').value}];render(items);if(doPrint)requestLabelPrint()}catch(e){message(e.message)}}
-$('singlePreview').onclick=()=>action(false,false);$('singlePrint').onclick=()=>action(false,true);$('batchPreview').onclick=()=>action(true,false);$('batchPrint').onclick=()=>action(true,true);$('retryPrint').onclick=()=>{try{requestLabelPrint()}catch(e){message('无法打开打印窗口：'+e.message)}};
-
-function locationDigits(value){return String(value??'').trim().toUpperCase()}
-function filteredData(){const query=$('locationFilter').value.trim().toUpperCase();return query?data.filter(r=>locationDigits(r.loc).startsWith(query)):data}
-$('locationFilter').oninput=()=>{batchPage=0;table();$('sheet').replaceChildren()};
-let batchPage=0;const pageSize=100;function table(){const visible=filteredData();batchPage=Math.min(batchPage,Math.max(0,Math.ceil(visible.length/pageSize)-1));const body=$('rows');body.replaceChildren();visible.slice(batchPage*pageSize,(batchPage+1)*pageSize).forEach(r=>{const tr=document.createElement('tr');const td=document.createElement('td');const c=document.createElement('input');c.type='checkbox';c.checked=r.selected;c.onchange=()=>{r.selected=c.checked;count()};td.append(c);tr.append(td);fields.forEach(k=>{const td=document.createElement('td'),i=document.createElement('input');i.value=r[k];i.type=k==='qty'?'number':'text';i.oninput=()=>{r[k]=i.value;count()};td.append(i);tr.append(td)});body.append(tr)});$('pageInfo').textContent='第 '+(batchPage+1)+' / '+Math.max(1,Math.ceil(visible.length/pageSize))+' 页（每页100条）';$('prevPage').disabled=batchPage===0;$('nextPage').disabled=(batchPage+1)*pageSize>=visible.length;count()}
-$('prevPage').onclick=()=>{batchPage--;table()};$('nextPage').onclick=()=>{batchPage++;table()};function count(){const visible=filteredData();$('count').textContent='商品库共 '+data.length+' 个商品，当前筛选 '+visible.length+' 个，当前范围选中 '+visible.filter(r=>r.selected).length+' 个。';$('all').checked=visible.length>0&&visible.every(r=>r.selected);$('all').indeterminate=visible.some(r=>r.selected)&&!$('all').checked;}$('all').onchange=()=>{filteredData().forEach(r=>r.selected=$('all').checked);table()};
-function csv(text){let rows=[],row=[],v='',q=false;for(let i=0;i<text.length;i++){let c=text[i];if(c==='"'){if(q&&text[i+1]==='"'){v+='"';i++}else q=!q}else if(c===','&&!q){row.push(v);v=''}else if((c==='\n'||c==='\r')&&!q){if(c==='\r'&&text[i+1]==='\n')i++;row.push(v);rows.push(row);row=[];v=''}else v+=c}if(v||row.length){row.push(v);rows.push(row)}if(q)throw Error('CSV引号未闭合');return rows}
-let activeImport=null;async function excelRead(buf){if(activeImport)throw Error('已有文件正在导入，请等待或取消');return new Promise((resolve,reject)=>{const worker=new Worker('excel-worker.js');const cleanup=()=>{worker.terminate();activeImport=null;$('cancelImport').hidden=true};activeImport={worker,cancel:()=>{cleanup();reject(Error('导入已取消，原数据保留'))}};$('cancelImport').hidden=false;message('开始导入，请稍候；可以点击取消导入。');worker.onmessage=event=>{const result=event.data;if(result.progress){message(result.progress);return}cleanup();if(result.error){reject(Error(result.error));return}warnings=result.warning||'';resolve(result.books)};worker.onerror=()=>{cleanup();reject(Error('后台解析失败，请刷新页面后重试'))};worker.postMessage({buffer:buf},[buf])})}
-
-async function unzip(buf){const view=new DataView(buf),u=new Uint8Array(buf);let end=u.length-22;while(end>=Math.max(0,u.length-65557)&&view.getUint32(end,true)!==0x06054b50)end--;if(end<0)throw Error('不是有效的xlsx文件');let p=view.getUint32(end+16,true),out={};const num=view.getUint16(end+10,true);for(let i=0;i<num;i++){if(view.getUint32(p,true)!==0x02014b50)throw Error('Excel压缩目录异常');const method=view.getUint16(p+10,true),size=view.getUint32(p+20,true),nl=view.getUint16(p+28,true),el=view.getUint16(p+30,true),cl=view.getUint16(p+32,true),offset=view.getUint32(p+42,true),name=new TextDecoder().decode(u.slice(p+46,p+46+nl));if(size>20000000)throw Error('Excel文件过大，请拆分');const start=offset+30+view.getUint16(offset+26,true)+view.getUint16(offset+28,true);let bytes=u.slice(start,start+size);if(method===8){try{bytes=new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer())}catch{throw Error('当前浏览器不支持Excel解压，请使用新版Chrome或Edge，或另存为CSV导入')}}else if(method!==0)throw Error('不支持此Excel压缩方式');out[name]=new TextDecoder().decode(bytes);p+=46+nl+el+cl}return out}
-const xml=s=>{const d=new DOMParser().parseFromString(s,'application/xml');if(d.querySelector('parsererror'))throw Error('Excel内容无法解析');return d};const nodes=(d,n)=>Array.from(d.getElementsByTagNameNS('*',n));const text=d=>nodes(d,'t').map(n=>n.textContent).join('');
-async function xlsx(buf){const files=await unzip(buf),strings=files['xl/sharedStrings.xml']?nodes(xml(files['xl/sharedStrings.xml']),'si').map(text):[],rel={};nodes(xml(files['xl/_rels/workbook.xml.rels']),'Relationship').forEach(r=>{let path=r.getAttribute('Target');if(path.startsWith('/'))path=path.slice(1);else path='xl/'+path;rel[r.getAttribute('Id')]=path});return nodes(xml(files['xl/workbook.xml']),'sheet').map(s=>{const id=s.getAttribute('r:id')||s.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships','id'),path=rel[id];if(!files[path])throw Error('无法读取工作表');const rows=nodes(xml(files[path]),'row').map(row=>{const out=[];nodes(row,'c').forEach(c=>{const letters=(c.getAttribute('r')||'A').replace(/\d/g,'');let col=0;for(const l of letters)col=col*26+l.charCodeAt(0)-64;const type=c.getAttribute('t'),raw=nodes(c,'v')[0]?.textContent||'';if(type!=='s'&&type!=='inlineStr'&&/^\d{16,}$/.test(raw))warnings='检测到长数字单元格：Excel可能已改变编码，请核对SKU，并使用文本格式。';out[col-1]=type==='s'?strings[Number(raw)]??'':type==='inlineStr'?text(c):raw});return out});return {name:s.getAttribute('name'),rows}})}
-
-let catalogData=[],catalogBooks=[],catalogWarning='';const catalogKey='label-product-catalog-v1';const catalogAliases={name:['商品名称','商品名','名称','门店商品名称'],sku:['sku码','sku','商品条码','商品编码','商品编号'],spec:['规格','规格信息','商品规格'],loc:['库位','库位编码','库位编号','货位']};
-function catalogInfo(extra=''){$('catalogInfo').textContent=extra}
-function normalizeHeader(v){return String(v??'').trim().toLowerCase()}
-function suggestColumn(columns,key){return columns.findIndex(h=>catalogAliases[key].includes(normalizeHeader(h)))}
-function catalogMapping(){const rows=catalogBooks[Number($('catalogTabs').value)].rows,head=rows[0]||[];$('catalogFields').replaceChildren();for(const key of ['name','sku','spec','loc']){const label=document.createElement('label');label.textContent=({name:'商品名称列',sku:'SKU码列',spec:'规格列',loc:'库位列'})[key];const select=document.createElement('select');select.id='map-'+key;const empty=document.createElement('option');empty.value='-1';empty.textContent=key==='spec'?'无规格列（选填）':'请选择对应列';select.append(empty);head.forEach((h,i)=>{const option=document.createElement('option');option.value=i;option.textContent=String(h||'未命名列')+'（第'+(i+1)+'列）';select.append(option)});select.value=String(suggestColumn(head,key));label.append(select);$('catalogFields').append(label)}}
-function mapCatalog(rows,map){if(['name','sku','loc'].some(key=>map[key]<0))throw Error('请为商品名称、SKU、库位选择对应列；规格选填');const mapped=Object.values(map).filter(n=>n>=0);if(new Set(mapped).size!==mapped.length)throw Error('已选字段需要选择不同的数据列');return rows.slice(1).filter(row=>row.some(v=>String(v??'').trim())).map(row=>Object.fromEntries(Object.entries(map).map(([key,col])=>[key,String(row[col]??'').trim()]))).filter(r=>r.name||r.sku)}
-function searchCatalog(){const query=$('catalogSearch').value.trim().toLowerCase(),box=$('catalogResults');box.replaceChildren();box.hidden=!query;if(!query)return;const results=catalogData.filter(r=>[r.name,r.sku,r.loc].some(v=>v.toLowerCase().includes(query)));const limit=50;const tip=document.createElement('p');tip.className='tip';tip.textContent=!catalogData.length?'尚未读到商品库，请查看上方状态提示。':'匹配 '+results.length+' 个商品'+(results.length>limit?'，显示前50个，请输入更具体的关键词':'');box.append(tip);for(const r of results.slice(0,limit)){const button=document.createElement('button');button.className='secondary';button.style.display='block';button.style.width='100%';button.style.textAlign='left';button.textContent=r.name+' ｜ SKU：'+r.sku+' ｜ '+r.spec+' ｜ 库位：'+r.loc;button.onclick=()=>{selectedSingleProduct={...r};for(const key of ['name','sku','spec','loc'])$(key).value=r[key];$('qty').value='1';$('singlePreview').disabled=false;$('singlePrint').disabled=false;imageExportButtons();setView('single');$('name').scrollIntoView({behavior:'smooth',block:'center'})};box.append(button)}}
-let searchTimer;$('catalogSearch').oninput=()=>{clearTimeout(searchTimer);if(!$('catalogSearch').value.trim()){searchCatalog();return}searchTimer=setTimeout(searchCatalog,180)};$('catalogTabs').onchange=catalogMapping;
-$('catalogManualUpload').onclick=()=>{if($('catalogApply').disabled)return;$('catalogManualPanel').open=true;$('catalogFile').click()};
-$('catalogFile').onchange=async()=>{const savedWarning=warnings;try{const file=$('catalogFile').files[0];if(!file)return;if(file.size>10000000)throw Error('文件超过10MB，请拆分');warnings='';catalogBooks=file.name.toLowerCase().endsWith('.csv')?[{name:'CSV',rows:csv((await file.text()).replace(/^\uFEFF/,''))}]:await excelRead(await file.arrayBuffer());catalogWarning=warnings;$('catalogTabs').replaceChildren();catalogBooks.forEach((book,i)=>{const option=document.createElement('option');option.value=i;option.textContent=book.name;$('catalogTabs').append(option)});$('catalogMapping').hidden=false;catalogMapping();message('请选择工作表并核对列对应关系，再确认替换商品库。'+catalogWarning)}catch(error){message('商品库上传失败：'+error.message)}finally{warnings=savedWarning}};
-$('catalogApply').onclick=async()=>{
- const button=$('catalogApply');button.disabled=true;
+document.getElementById('downloadLegacy').onclick=()=>{
+ if(!legacyCatalog)return;
  try{
-  const mapping=Object.fromEntries(['name','sku','spec','loc'].map(key=>[key,Number($('map-'+key).value)]));
-  const next=mapCatalog(catalogBooks[Number($('catalogTabs').value)].rows,mapping);
-  if(!next.length)throw Error('该工作表没有可用商品');
-  const now=new Date();const saved={rows:next,revision:now.toISOString(),updated:now.toLocaleString('zh-CN'),source:'本地上传：'+($('catalogFile').files[0]?.name||'商品库文件')};
- try{localStorage.setItem(catalogKey,JSON.stringify(saved))}catch{throw Error('无法保存商品库，请检查浏览器存储空间或权限；原商品库保持不变。')}
-  useLocalCatalog(saved);$('catalogMapping').hidden=true;
-  $('catalogStatus').textContent='商品库已固定保存，共 '+catalogData.length.toLocaleString('zh-CN')+' 个商品。刷新或重新打开仍使用这份数据，只有重新上传并确认后才替换。';
-  message('商品库已替换，共 '+catalogData.length+' 个商品。'+(catalogWarning?'\n'+catalogWarning:''));
- }catch(error){message('导入失败：'+error.message)}finally{button.disabled=false}
+  const blob=new Blob([JSON.stringify(legacyCatalog)],{type:'application/json;charset=utf-8'});
+  const url=URL.createObjectURL(blob),link=document.createElement('a');
+  link.href=url;link.download='旧商品库_云端迁移.json';document.body.append(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),2000);
+  document.getElementById('status').textContent='已请求下载旧商品库JSON。请用管理员账号在团队版上传并确认保存到云端。';
+ }catch(error){document.getElementById('status').textContent='旧商品库导出失败：'+error.message+'。也可以上传原Excel或CSV文件。'}
 };
-
-let catalogRevision='';
-function useLocalCatalog(saved){
- if(!saved||!Array.isArray(saved.rows)||!saved.rows.length||saved.rows.some(r=>!r||['name','sku','spec','loc'].some(key=>typeof r[key]!=='string')))throw Error('商品库为空或格式无效，当前商品库保持不变。');
- // Keep the uploaded catalog immutable; printing uses separate product copies.
- catalogData=Object.freeze(saved.rows.map(row=>Object.freeze({...row})));catalogRevision=saved.revision||'';
- $('catalogCount').textContent=catalogData.length.toLocaleString('zh-CN');
- $('catalogUpdated').textContent=saved.updated||'未知';
- const missing=catalogData.filter(r=>!r.loc.trim()).length;
- catalogInfo('来源：'+(saved.source||'本地缓存')+'。缺少库位 '+missing+' 个，打印前需补填。'+(saved.warning||''));
- searchCatalog();
- if(currentView==='batch')loadBatchCatalog();
-}
-function reloadCatalog(){
- try{
-  const saved=JSON.parse(localStorage.getItem(catalogKey)||'null');
-  if(saved){
-   useLocalCatalog(saved);
-   $('catalogStatus').textContent='正在使用已保存的商品库，共 '+catalogData.length.toLocaleString('zh-CN')+' 个商品。仅重新上传并确认替换时更新。';
-  }else if(!catalogData.length){
-   $('catalogCount').textContent='0';$('catalogUpdated').textContent='尚未导入';
-   catalogInfo('尚未载入商品数据。');
-   $('catalogStatus').textContent='点击“本地上传文件”，选择Excel或CSV商品库并确认导入。';
-  }else{
-   $('catalogStatus').textContent='当前商品库可继续使用。上传本地文件可重新保存商品库。';
-  }
- }catch(error){
-  if(!catalogData.length){$('catalogCount').textContent='0';$('catalogUpdated').textContent='未读取';catalogInfo('请重新上传本地商品库文件。')}
-  $('catalogStatus').textContent='读取已保存商品库失败：'+error.message+(catalogData.length?' 当前商品库继续可用。':' 请上传本地文件。');
- }
- searchCatalog();
- if(currentView==='batch')loadBatchCatalog();
-}
-function loadBatchCatalog(force=false){
- if(!catalogData.length){
-  $('batchSource').textContent='商品库尚未载入，请查看上方商品库状态。';
-  table();return;
- }
- if(!force&&batchCatalogRevision===catalogRevision)return;
- data=catalogData.map(r=>({...r,qty:'1',selected:true}));
- batchCatalogRevision=catalogRevision;warnings='';batchPage=0;
- $('sheet').replaceChildren();$('retryPrint').hidden=true;table();
- $('batchSource').textContent='使用当前商品库，共 '+data.length.toLocaleString('zh-CN')+' 个商品，默认全部选中。筛选库位并设置份数后直接打印；不需要的商品可取消勾选。';
-}
-$('catalogBatch').onclick=()=>{
- if(!catalogData.length){message('商品库为空，请先上传本地文件并确认导入。');return}
- loadBatchCatalog(true);setView('batch');
- message('已重新载入商品库，共 '+data.length+' 个商品，已默认全部选中，可取消不需要打印的商品。');
-};
-// Start without a selected product, including when the browser restores form values.
-for(const key of ['name','sku','spec','loc'])$(key).value='';
-$('singlePreview').disabled=true;$('singlePrint').disabled=true;$('singleImage').disabled=true;
-// Restore the browser catalog without selecting a product.
-reloadCatalog();
-
-function bindDrop(zoneId,inputId){const zone=$(zoneId),input=$(inputId);let depth=0;zone.addEventListener('keydown',event=>{if(event.target===zone&&(event.key==='Enter'||event.key===' ')){event.preventDefault();input.click()}});zone.addEventListener('dragenter',event=>{event.preventDefault();depth++;zone.classList.add('active')});zone.addEventListener('dragover',event=>{event.preventDefault();event.dataTransfer.dropEffect='copy'});zone.addEventListener('dragleave',event=>{event.preventDefault();if(--depth<=0){depth=0;zone.classList.remove('active')}});zone.addEventListener('drop',event=>{event.preventDefault();depth=0;zone.classList.remove('active');const files=event.dataTransfer.files;if(files.length!==1){message('请一次拖入一个Excel或CSV文件。');return}if(!/\.(xlsx|xls|csv)$/i.test(files[0].name)){message('仅支持.xlsx、.xls或.csv文件。');return}const transfer=new DataTransfer();transfer.items.add(files[0]);input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}))})}
-bindDrop('catalogDrop','catalogFile');window.addEventListener('dragover',event=>{if(Array.from(event.dataTransfer.types||[]).includes('Files'))event.preventDefault()});window.addEventListener('drop',event=>{if(Array.from(event.dataTransfer.types||[]).includes('Files'))event.preventDefault()});
-
-function bindClear(key,inputId){const input=$(inputId),picked=$(key+'Picked');function refresh(){picked.hidden=!input.files.length;$(key+'Filename').textContent=input.files[0]?.name||''}input.addEventListener('change',refresh);$(key+'Clear').onclick=()=>{if(activeImport)activeImport.cancel();input.value='';refresh();catalogBooks=[];catalogWarning='';$('catalogMapping').hidden=true;$('catalogTabs').replaceChildren();$('catalogFields').replaceChildren();message('已移除上传文件，可以重新上传；当前已保存的商品库仍可使用。')};refresh()}
-bindClear('catalog','catalogFile');
-$('cancelImport').onclick=()=>activeImport?.cancel();
-
-let pdfBusy=false;function loadExportScript(src){return new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.onload=resolve;script.onerror=()=>{script.remove();reject(Error('导出组件加载失败，请重试'))};document.head.append(script)})}
-$('batchPdf').onclick=async()=>{if(pdfBusy||imageBusy)return;pdfBusy=true;imageExportButtons();try{message('正在准备PDF…');render(filteredData().filter(r=>r.selected));if(typeof html2canvas==='undefined')await loadExportScript('html2canvas.min.js');if(!window.jspdf)await loadExportScript('jspdf.umd.min.js');await document.fonts.ready;const tags=Array.from($('sheet').querySelectorAll('.tag')),pdf=new window.jspdf.jsPDF({orientation:'landscape',unit:'mm',format:[80,60],compress:true});for(let i=0;i<tags.length;i++){message('正在生成PDF：'+(i+1)+' / '+tags.length);const canvas=await html2canvas(tags[i],{scale:3,backgroundColor:'#ffffff',logging:false,onclone:doc=>{const sheet=doc.getElementById('sheet');if(sheet){sheet.style.maxHeight='none';sheet.style.overflow='visible'}doc.querySelectorAll('.tag').forEach(t=>{t.style.boxShadow='none';t.style.outline='none'})}});if(i)pdf.addPage([80,60],'landscape');pdf.addImage(canvas.toDataURL('image/png'),'PNG',0,0,80,60,undefined,'FAST');canvas.width=0;canvas.height=0}pdf.save('商品标签_80x60.pdf');message('PDF已生成，每页80×60毫米。下载后打开PDF，选择实际大小100%打印。')}catch(error){message('PDF导出失败：'+error.message)}finally{pdfBusy=false;imageExportButtons()}};
-let imageBusy=false;
-const imageWidth=945,imageHeight=709;
-const checksumTable=Uint32Array.from({length:256},(_,value)=>{let crc=value;for(let bit=0;bit<8;bit++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);return crc>>>0});
-function exportCrc32(bytes){let crc=0xffffffff;for(const value of bytes)crc=checksumTable[(crc^value)&255]^(crc>>>8);return (crc^0xffffffff)>>>0}
-function pngPrintResolution(bytes){
- const chunk=new Uint8Array(21),view=new DataView(chunk.buffer);view.setUint32(0,9);chunk.set([112,72,89,115],4);view.setUint32(8,11811);view.setUint32(12,11811);chunk[16]=1;view.setUint32(17,exportCrc32(chunk.subarray(4,17)));
- const parts=[bytes.subarray(0,8)];let position=8,inserted=false;
- while(position+12<=bytes.length){const length=new DataView(bytes.buffer,bytes.byteOffset+position,4).getUint32(0),end=position+12+length;if(end>bytes.length)throw Error('图片数据不完整，请重试。');const type=String.fromCharCode(...bytes.subarray(position+4,position+8));if(type!=='pHYs')parts.push(bytes.subarray(position,end));if(type==='IHDR'){parts.push(chunk);inserted=true}position=end}
- if(!inserted||position!==bytes.length)throw Error('图片格式无效，请重试。');return new Blob(parts,{type:'image/png'});
-}
-function labelImageZip(entries){
- const encoder=new TextEncoder(),parts=[],directory=[];let offset=0,directorySize=0;
- const now=new Date(),year=Math.min(2107,Math.max(1980,now.getFullYear())),date=((year-1980)<<9)|((now.getMonth()+1)<<5)|now.getDate(),time=(now.getHours()<<11)|(now.getMinutes()<<5)|(now.getSeconds()>>1);
- for(const entry of entries){
-  const name=encoder.encode(entry.name),size=entry.bytes.length,crc=exportCrc32(entry.bytes),header=new Uint8Array(30+name.length),local=new DataView(header.buffer);
-  local.setUint32(0,0x04034b50,true);local.setUint16(4,20,true);local.setUint16(6,0x0800,true);local.setUint16(10,time,true);local.setUint16(12,date,true);local.setUint32(14,crc,true);local.setUint32(18,size,true);local.setUint32(22,size,true);local.setUint16(26,name.length,true);header.set(name,30);parts.push(header,entry.bytes);
-  const central=new Uint8Array(46+name.length),record=new DataView(central.buffer);record.setUint32(0,0x02014b50,true);record.setUint16(4,20,true);record.setUint16(6,20,true);record.setUint16(8,0x0800,true);record.setUint16(12,time,true);record.setUint16(14,date,true);record.setUint32(16,crc,true);record.setUint32(20,size,true);record.setUint32(24,size,true);record.setUint16(28,name.length,true);record.setUint32(42,offset,true);central.set(name,46);directory.push(central);directorySize+=central.length;offset+=header.length+size;
- }
- const end=new Uint8Array(22),record=new DataView(end.buffer);record.setUint32(0,0x06054b50,true);record.setUint16(8,entries.length,true);record.setUint16(10,entries.length,true);record.setUint32(12,directorySize,true);record.setUint32(16,offset,true);return new Blob([...parts,...directory,end],{type:'application/zip'});
-}
-function labelImageFilename(row,index){const clean=value=>String(value??'').replace(/[\\/:*?"<>|\x00-\x1f]/g,'_').trim().replace(/[. ]+$/g,'');return '标签_'+String(index+1).padStart(3,'0')+'_'+(clean(row.name).slice(0,40)||'商品')+'_'+clean(row.sku)+'.png'}
-function downloadLabelBlob(blob,filename){const link=document.createElement('a'),url=URL.createObjectURL(blob);link.href=url;link.download=filename;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000)}
-async function labelPngBytes(label){
- const rendered=await html2canvas(label,{scale:300/96,backgroundColor:'#ffffff',logging:false,scrollX:0,scrollY:0});
- const output=document.createElement('canvas');output.width=imageWidth;output.height=imageHeight;
- try{const context=output.getContext('2d');if(!context)throw Error('浏览器无法生成图片，请重试。');context.fillStyle='#ffffff';context.fillRect(0,0,imageWidth,imageHeight);context.drawImage(rendered,0,0,imageWidth,imageHeight);const png=await new Promise((resolve,reject)=>output.toBlob(blob=>blob?resolve(blob):reject(Error('图片生成失败，请重试。')),'image/png'));return new Uint8Array(await pngPrintResolution(new Uint8Array(await png.arrayBuffer())).arrayBuffer())}
- finally{rendered.width=0;rendered.height=0;output.width=0;output.height=0}
-}
-function imageExportButtons(){const busy=imageBusy||pdfBusy;$('singleImage').disabled=busy||!selectedSingleProduct;$('batchImage').disabled=busy;$('batchPdf').disabled=busy}
-async function exportLabelImages(batch){
- if(imageBusy||pdfBusy)return;imageBusy=true;imageExportButtons();let host;
- try{
-  if(!batch&&!selectedSingleProduct)throw Error('请先查询并点击商品确认，再下载标签图片。');
-  const items=batch?filteredData().filter(row=>row.selected).map(row=>({...row})):[{...selectedSingleProduct,qty:$('qty').value}];
-  render(items);
-  const labels=Array.from($('sheet').querySelectorAll('.tag')),snapshots=[];let cursor=0;
-  for(const row of items){snapshots.push({row:{...row},label:labels[cursor].cloneNode(true),copies:qty(row.qty)});cursor+=qty(row.qty)}
-  host=document.createElement('div');host.setAttribute('aria-hidden','true');host.style.cssText='position:absolute;left:-10000px;top:0;width:80mm;background:white;pointer-events:none;';document.body.append(host);
-  if(typeof html2canvas==='undefined')await loadExportScript('html2canvas.min.js');await document.fonts.ready;
-  const entries=[];let completed=0;
-  for(const snapshot of snapshots){
-   message('正在生成标签图片：'+(completed+1)+' / '+labels.length);
-   snapshot.label.style.boxShadow='none';snapshot.label.style.outline='none';host.replaceChildren(snapshot.label);
-   const bytes=await labelPngBytes(snapshot.label);
-   for(let copy=0;copy<snapshot.copies;copy++){entries.push({name:labelImageFilename(snapshot.row,completed),bytes});completed++}
-  }
-  if(entries.length===1)downloadLabelBlob(new Blob([entries[0].bytes],{type:'image/png'}),entries[0].name);
-  else downloadLabelBlob(labelImageZip(entries),'商品标签图片_80x60_'+entries.length+'张.zip');
-  message('已生成 '+entries.length+' 张PNG标签图片（945×709像素，300dpi）。'+(entries.length>1?'已打包为ZIP，解压后可查看图片。':'已开始下载。'));
- }catch(error){message('标签图片下载失败：'+error.message)}
- finally{host?.remove();imageBusy=false;imageExportButtons()}
-}
-$('singleImage').onclick=()=>exportLabelImages(false);$('batchImage').onclick=()=>exportLabelImages(true);
-
-window.addEventListener('error',event=>{const msg='页面运行错误：'+event.message;if($('batchStatus'))$('batchStatus').textContent=msg});
-
-function setView(view){if(!['single','batch','settings'].includes(view))view='single';currentView=view;for(const key of ['single','batch','settings'])$(key+'Panel').hidden=key!==view;document.querySelectorAll('.app-nav button').forEach(button=>{const active=button.dataset.view===view;button.classList.toggle('active',active);button.setAttribute('aria-current',active?'page':'false')});$('sheet').hidden=view==='settings';$('previewHeading').hidden=view==='settings';if(view==='single'){if(selectedSingleProduct)action(false,false);else{$('sheet').replaceChildren();$('retryPrint').hidden=true;message('请先查询并点击商品确认，再预览或打印。')}}else if(view==='batch'){$('sheet').replaceChildren();loadBatchCatalog();table()}history.replaceState(null,'','#'+view)}
-document.querySelectorAll('.app-nav button').forEach(button=>button.addEventListener('click',()=>setView(button.dataset.view)));setView(location.hash.slice(1)||'single');
-</script></html>
+</script>
+</body>
+</html>
