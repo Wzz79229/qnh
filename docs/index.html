@@ -5,172 +5,21 @@ header{padding:18px 24px;background:#18334c}.header-sub{margin:7px 0 0;font-size
 
 .settings-layout{display:grid;grid-template-columns:minmax(300px,1fr) minmax(280px,1fr);gap:24px;align-items:start}.label-diagram{width:100%;display:block;background:#f4f7fb;border-radius:12px}.element-guide{display:grid;gap:10px}.element-guide article{border:1px solid #dce4ed;border-left:4px solid var(--accent);border-radius:8px;padding:12px 14px;background:#fff}.element-guide h3{margin:0 0 5px;font-size:15px}.element-guide p{margin:0;font-size:13px;color:#526779;line-height:1.65}.element-guide strong{color:#18212e}.measure-chips{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0}.measure-chips span{padding:7px 11px;background:#edf3fa;color:#174d81;border-radius:6px;font-size:13px}.settings-table{font-size:13px}.settings-table th{width:40%}.app-nav{flex-wrap:wrap}@media(max-width:760px){.settings-layout{grid-template-columns:1fr}.app-nav button{padding:10px 12px}}
  .sku-barcode{display:flex;justify-content:center;align-items:center;height:8mm;flex-shrink:0}.sku-barcode svg{display:block;flex-shrink:0}.tag{gap:1mm}.tag>div{flex-shrink:0}
-.sync-card{padding:15px 18px;background:#f0f6fc;border:1px solid #c6d9eb;border-radius:9px}.sync-card>strong{color:#174d81}.sync-actions{display:flex;flex-wrap:wrap;gap:8px}.sync-actions button{margin:4px 0}.sync-actions button:disabled,button:disabled{opacity:.55;cursor:wait}.manual-catalog{margin-top:14px}.manual-catalog>summary{cursor:pointer;color:#51687b;font-size:13px}#qnhStatus{white-space:pre-wrap}#catalogInfo{padding:10px 0;border-bottom:1px solid #e0e7ed}
+.sync-card{padding:15px 18px;background:#f0f6fc;border:1px solid #c6d9eb;border-radius:9px}.sync-card>strong{color:#174d81}.sync-actions{display:flex;flex-wrap:wrap;gap:8px}.sync-actions button{margin:4px 0}.sync-actions button:disabled,button:disabled{opacity:.55;cursor:wait}.manual-catalog{margin-top:14px}.manual-catalog>summary{cursor:pointer;color:#51687b;font-size:13px}#catalogStatus{white-space:pre-wrap}#catalogInfo{padding:10px 0;border-bottom:1px solid #e0e7ed}
 .version-chip{font-size:11px;color:#607689;float:right}
 .sku-row{display:flex;align-items:center;justify-content:flex-start;gap:1mm;width:100%}.sku-row .sku{flex-shrink:0;text-align:left}.sku-text{display:inline-block;white-space:nowrap;transform-origin:left center}.sku-prefix,.sku-value{font:inherit;letter-spacing:0;word-spacing:0;padding:0}.sku-value{margin-left:-.4mm}
 
-.qnh-connection-tools{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin:0 0 16px;padding:12px 14px;background:#f0f6fc;border:1px solid #c6d9eb;border-radius:9px}.qnh-connection-tools>button{margin:0;background:#174d81;color:white;font-weight:700;padding:9px 14px}.qnh-local-link{color:#174d81;border:1px solid #bacadb;padding:8px 10px;border-radius:6px;text-decoration:none;font-size:13px;white-space:nowrap}.qnh-local-link[hidden]{display:none}.qnh-connection-status{display:inline-flex;align-items:center;gap:6px;border:1px solid #bacadb;background:white;border-radius:999px;padding:6px 10px;font-size:13px;white-space:nowrap;color:#526779}.qnh-connection-status:before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}.qnh-connection-status[data-state=connected]{color:#15803d}.qnh-connection-status[data-state=waiting_login],.qnh-connection-status[data-state=connecting],.qnh-connection-status[data-state=checking]{color:#9a6700}.qnh-connection-status[data-state=error],.qnh-connection-status[data-state=unavailable]{color:#b42318}.qnh-connection-hint{order:5;flex-basis:100%;font-size:13px;color:#526779;line-height:1.6}.qnh-connection-settings{position:relative;font-size:13px;color:#526779;margin-left:auto}.qnh-connection-settings>summary{cursor:pointer}.qnh-connection-settings>div{position:absolute;right:0;top:28px;width:245px;z-index:40;background:white;color:#18212e;border:1px solid #bacadb;padding:14px;border-radius:8px;box-shadow:0 5px 18px #0003}.qnh-connection-settings p{font-size:12px;color:#526779;line-height:1.5;margin-bottom:0}@media(max-width:600px){.qnh-connection-tools{padding:10px;gap:8px}}
-.qnh-login-monitor{order:4;flex-basis:100%;display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding-top:8px;border-top:1px solid #d4e1ef;font-size:13px;color:#526779}.qnh-login-monitor strong{color:#18334c}.qnh-connection-status[data-state=logged_in]{color:#15803d}.qnh-connection-status[data-state=expired],.qnh-connection-status[data-state=unavailable]{color:#b42318}.qnh-connection-status[data-state=unknown]{color:#9a6700}.qnh-connection-tools>#qnhLoginCheck{background:white;color:#174d81;border:1px solid #bacadb}.qnh-connection-tools button:disabled{opacity:.65;cursor:wait}
 
-.app-status-panel{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;background:#f0f6fc;border-color:#c6d9eb}.app-status-panel .qnh-connection-tools{padding:14px 0 0;margin:0;border:0;border-top:1px solid #c6d9eb;background:transparent;align-content:start}.app-status-panel .sync-card{padding:0;background:transparent;border:0;border-radius:0}.app-status-panel .sync-card>strong{font-size:18px}.app-status-panel #catalogInfo{padding:0;margin-bottom:0;border:0}.batch-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.batch-heading h2{margin:0}.batch-heading button{margin:0}#batchSource{margin:12px 0}@media print{.app-status-panel{display:none!important}}
+.app-status-panel{display:grid;grid-template-columns:minmax(0,1fr);gap:16px;background:#f0f6fc;border-color:#c6d9eb}.app-status-panel .sync-card{padding:0;background:transparent;border:0;border-radius:0}.app-status-panel .sync-card>strong{font-size:18px}.app-status-panel #catalogInfo{padding:0;margin-bottom:0;border:0}.batch-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.batch-heading h2{margin:0}.batch-heading button{margin:0}#batchSource{margin:12px 0}@media print{.app-status-panel{display:none!important}}
 
 .catalog-cache-summary{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:16px;margin:16px 0}.catalog-cache-stat{min-width:0;padding:18px 20px;background:#fff;border:2px solid #8cb5da;border-radius:10px;box-shadow:0 3px 10px #174d8112}.catalog-cache-stat>span{display:block;font-size:15px;font-weight:700;color:#465c70;margin-bottom:10px}#catalogCount{font-size:44px;line-height:1.15;color:#174d81;font-variant-numeric:tabular-nums}.catalog-count-unit{font-size:18px;font-weight:700;color:#465c70}#catalogUpdated{display:block;font-size:28px;line-height:1.45;color:#174d81;overflow-wrap:anywhere}.single-product-search{margin-bottom:18px;padding:12px 14px;background:#f5f9fd;border:1px solid #dce4ed;border-radius:8px}.single-product-search>summary{cursor:pointer;font-weight:700;color:#174d81}.single-product-search label{margin-top:12px}@media(max-width:600px){.catalog-cache-summary{grid-template-columns:1fr;gap:10px}.catalog-cache-stat{padding:14px 16px}#catalogCount{font-size:38px}#catalogUpdated{font-size:24px}}
 
-.local-service-tools{display:flex;align-items:center;flex-wrap:wrap;gap:10px;flex-basis:100%;padding-bottom:12px;border-bottom:1px solid #c6d9eb}.local-service-button{background:#174d81;color:#fff;font-size:14px;font-weight:700;padding:9px 14px}.local-service-button[aria-disabled="true"]{opacity:.65;cursor:wait}.local-service-hint{flex-basis:100%;color:#526779;font-size:13px;line-height:1.6}
-</style><header><h1>商品标签打印程序 · 80 × 60毫米</h1><p class="header-sub">本地商品库 · 按需更新牵牛花数据 · 单个与批量标签打印</p></header><main><section class="panel app-status-panel" id="appStatusPanel" aria-label="牵牛花连接与商品库状态"><div class="sync-card"><strong>商品库 · 当前浏览器缓存</strong><span class="version-chip">云端版 1.1.7</span><div class="catalog-cache-summary" role="status" aria-live="polite"><div class="catalog-cache-stat"><span>商品库商品数量</span><div><strong id="catalogCount">—</strong><span class="catalog-count-unit"> 个</span></div></div><div class="catalog-cache-stat"><span>商品库更新时间</span><strong id="catalogUpdated">正在读取…</strong></div></div><p class="tip">平时打开、搜索和打印使用已保存的数据。只有点击“更新数据”才重新导出；更新失败保留原商品库。</p><div class="sync-actions"><button id="qnhUpdate" type="button">更新数据</button><button id="catalogManualUpload" type="button" class="secondary" aria-controls="catalogManualPanel">手动上传商品库</button><button id="qnhPause" type="button" class="secondary" disabled>暂停任务刷新</button><button id="catalogReload" type="button" class="secondary">重试读取缓存</button></div><p id="qnhStatus" class="tip" role="status">正在读取本地缓存…</p><p id="catalogInfo" class="tip"></p><details class="manual-catalog" id="catalogManualPanel"><summary>手动上传商品库（Excel / CSV）</summary><label class="drop-zone" id="catalogDrop" tabindex="0"><strong>拖拽商品库文件到这里，或点击选择</strong><span>支持Excel（.xlsx / .xls）和CSV</span><input id="catalogFile" type="file" accept=".xlsx,.xls,.csv"></label><div id="catalogPicked" hidden class="picked-file"><span id="catalogFilename"></span><button type="button" id="catalogClear" class="secondary" aria-label="移除已选择文件" title="移除文件">×</button></div><p class="tip">选择导出文件，核对商品名称、SKU、规格和库位列后确认。导入将替换本机缓存，刷新后仍可使用；此操作不会触发牵牛花导出。SKU请选择“SKU”列。</p><div id="catalogMapping" hidden><label>选择工作表<select id="catalogTabs"></select></label><div class="grid" id="catalogFields"></div><button id="catalogApply">确认并替换商品库</button></div></details></div><div class="qnh-connection-tools"><div class="local-service-tools"><a id="localServiceStart" class="qnh-local-link local-service-button" href="qnh-label://start?port=18765" role="button">连接本地服务</a><span id="localServiceStatus" class="qnh-connection-status" data-state="checking" role="status" aria-live="polite">正在检测本地服务…</span><span id="localServiceHint" class="local-service-hint">首次使用先运行此文件夹的 start.bat 一次，之后可点击按钮启动服务。</span></div><button type="button" id="qnhConnect">连接牵牛花</button><button type="button" id="qnhLoginCheck" class="secondary">检测登录</button><a id="qnhLocalLink" class="qnh-local-link" href="http://127.0.0.1:18765/#single" target="_blank" rel="noopener noreferrer">打开本地程序</a><span id="qnhConnection" class="qnh-connection-status" data-state="disconnected" role="status" aria-live="polite">未连接</span><div class="qnh-login-monitor"><strong>登录监控</strong><span id="qnhLoginBadge" class="qnh-connection-status" data-state="unknown" role="status" aria-live="polite">待确认</span><span id="qnhLoginChecked">等待检测</span><span>每5秒检测 · 监控程序打开的牵牛花窗口</span></div><span id="qnhConnectionHint" class="qnh-connection-hint">点击连接，在牵牛花窗口登录；连接不会重新导出商品库。</span><details class="qnh-connection-settings"><summary>连接设置</summary><div><label>本地程序端口<input id="qnhLocalPort" type="number" min="1024" max="65535" value="18765"></label><p>默认为18765；若启动窗口显示其他端口，在这里修改。</p></div></details></div></section><nav class="app-nav" aria-label="功能导航"><button type="button" data-view="single" aria-controls="singlePanel">单个打印</button><button type="button" data-view="batch" aria-controls="batchPanel">批量打印</button><button type="button" data-view="settings" aria-controls="settingsPanel">标签说明</button></nav><section class="panel workspace-panel" id="singlePanel"><h2>单个商品</h2><details class="single-product-search"><summary>查找商品</summary><label>搜索商品名称、SKU或库位<input id="catalogSearch" placeholder="输入关键词，点击商品自动填入标签"></label><div id="catalogResults" class="tablewrap"></div></details><div class="grid"><label>商品名称<textarea id="name">【规格可选】三防热敏标签纸 加厚优质多尺寸不干胶贴纸条码纸快递防水贴 1卷</textarea></label><label>规格（选填）<textarea id="spec">40×30×800张
+</style><header><h1>商品标签打印程序 · 80 × 60毫米</h1><p class="header-sub">本地文件上传商品库 · 单个与批量标签打印</p></header><main><section class="panel app-status-panel" id="appStatusPanel" aria-label="本地商品库上传与状态"><div class="sync-card"><strong>商品库 · 本地文件上传</strong><span class="version-chip">云端版 1.1.8</span><div class="catalog-cache-summary" role="status" aria-live="polite"><div class="catalog-cache-stat"><span>商品库商品数量</span><div><strong id="catalogCount">—</strong><span class="catalog-count-unit"> 个</span></div></div><div class="catalog-cache-stat"><span>商品库更新时间</span><strong id="catalogUpdated">正在读取…</strong></div></div><p class="tip">从本地上传商品库文件，确认列对应关系后更新。已保存的数据可用于搜索和打印；刷新网页后仍可使用。</p><div class="sync-actions"><button id="catalogManualUpload" type="button" aria-controls="catalogManualPanel">本地上传文件</button><button id="catalogReload" type="button" class="secondary">重新读取已保存商品库</button></div><p id="catalogStatus" class="tip" role="status">正在读取本地缓存…</p><p id="catalogInfo" class="tip"></p><details class="manual-catalog" id="catalogManualPanel" open><summary>本地上传商品库（Excel / CSV）</summary><label class="drop-zone" id="catalogDrop" tabindex="0"><strong>拖拽商品库文件到这里，或点击选择</strong><span>支持Excel（.xlsx / .xls）和CSV</span><input id="catalogFile" type="file" accept=".xlsx,.xls,.csv"></label><div id="catalogPicked" hidden class="picked-file"><span id="catalogFilename"></span><button type="button" id="catalogClear" class="secondary" aria-label="移除已选择文件" title="移除文件">×</button></div><p class="tip">选择本地文件，核对商品名称、SKU、规格和库位列后确认。导入将替换当前浏览器保存的商品库。SKU请选择“SKU”列；其他电脑需各自上传文件。</p><div id="catalogMapping" hidden><label>选择工作表<select id="catalogTabs"></select></label><div class="grid" id="catalogFields"></div><button id="catalogApply">确认并替换商品库</button></div></details></div></section><nav class="app-nav" aria-label="功能导航"><button type="button" data-view="single" aria-controls="singlePanel">单个打印</button><button type="button" data-view="batch" aria-controls="batchPanel">批量打印</button><button type="button" data-view="settings" aria-controls="settingsPanel">标签说明</button></nav><section class="panel workspace-panel" id="singlePanel"><h2>单个商品</h2><details class="single-product-search"><summary>查找商品</summary><label>搜索商品名称、SKU或库位<input id="catalogSearch" placeholder="输入关键词，点击商品自动填入标签"></label><div id="catalogResults" class="tablewrap"></div></details><div class="grid"><label>商品名称<textarea id="name">【规格可选】三防热敏标签纸 加厚优质多尺寸不干胶贴纸条码纸快递防水贴 1卷</textarea></label><label>规格（选填）<textarea id="spec">40×30×800张
 1卷（5克(g)／卷）</textarea></label><label>库位<input id="loc" value="C56-2-2"></label><label>SKU码（文字显示后六位，条码使用完整SKU）<input id="sku" value="1974417086377902136"></label><label>打印份数<input id="qty" type="number" min="1" max="500" value="1"></label></div><button id="singlePreview">预览单个商品</button><button id="singlePrint">打印单个商品</button></section><section class="panel workspace-panel" id="batchPanel"><div class="batch-heading"><h2>批量打印</h2><button id="catalogBatch" type="button" class="secondary">重新载入商品库</button></div><p id="batchSource" class="tip" role="status">正在读取商品库…</p><label>库位筛选（不限位数）<input id="locationFilter" placeholder="例如C、C56或C56-2；留空显示全部"></label><p class="tip">按输入内容匹配库位开头，不限位数。例如C56可匹配C56-2-2，C56-2可进一步缩小范围。筛选后仅预览、打印当前筛选范围内勾选的商品。</p><div class="tablewrap"><table><thead><tr><th><input type="checkbox" id="all">选择</th><th>商品名称</th><th>SKU码</th><th>规格</th><th>库位</th><th>份数</th></tr></thead><tbody id="rows"></tbody></table></div><button id="prevPage" class="secondary">上一页</button><span id="pageInfo"></span><button id="nextPage" class="secondary">下一页</button><br><button id="batchPreview">预览选中商品</button><button id="batchPrint" type="button">打印选中商品</button><button id="batchPdf" type="button">导出打印PDF</button><button id="retryPrint" type="button" hidden>再次打开打印窗口</button><p id="batchStatus" role="status" style="white-space:pre-wrap;color:#a32916"></p><p id="count" class="tip"></p></section><section id="settingsPanel" class="panel workspace-panel" hidden><h2>标签设置说明</h2><p class="tip">当前模板的可视化说明。示意图仅用于标注参数，不会打印到标签上。</p><div class="measure-chips"><span>80 × 60 mm</span><span>白底黑字</span><span>整体垂直居中</span><span>元素间隔 1 mm</span></div><div class="settings-layout"><div><svg class="label-diagram" viewBox="0 0 1000 780" role="img" aria-label="80乘60毫米标签示意图：商品名称、规格、SKU文字和完整SKU条码、底部库位"><defs><marker id="dimArrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10" fill="#64748b"/></marker></defs><path d="M100 55H900" stroke="#64748b" marker-start="url(#dimArrow)" marker-end="url(#dimArrow)"/><text x="500" y="37" text-anchor="middle" fill="#526779" font-size="24">宽 80 mm</text><rect x="100" y="90" width="800" height="600" rx="4" fill="white" stroke="#94a3b8" stroke-width="2"/><path d="M55 90V690" stroke="#64748b" marker-start="url(#dimArrow)" marker-end="url(#dimArrow)"/><text x="30" y="390" transform="rotate(-90 30 390)" text-anchor="middle" fill="#526779" font-size="24">高 60 mm</text><rect x="125" y="130" width="750" height="540" fill="none" stroke="#cbd5e1" stroke-dasharray="10 8"/><rect x="125" y="187.5" width="750" height="60" rx="8" fill="#eff6ff" stroke="#3b82f6"/><text x="500" y="230.5" text-anchor="middle" font-size="39" font-weight="700">商品名称 · 11pt</text><rect x="125" y="257.5" width="750" height="70" rx="8" fill="#ecfdf5" stroke="#10b981"/><text x="500" y="312.5" text-anchor="middle" font-size="53" font-weight="700">规格：15pt</text><rect x="125" y="442.5" width="750" height="150" rx="8" fill="#fff7ed" stroke="#f97316"/><text x="500" y="562.5" text-anchor="middle" font-family="Arial,sans-serif" font-size="120" font-weight="900">C56-2-2</text><rect x="125" y="337.5" width="750" height="95" rx="8" fill="#f5f3ff" stroke="#8b5cf6"/><rect x="355" y="345" width="520" height="80" fill="white"/><rect x="384.545" y="345" width="5.909" height="80" fill="black"/><rect x="393.409" y="345" width="2.955" height="80" fill="black"/><rect x="402.273" y="345" width="8.864" height="80" fill="black"/><rect x="417.045" y="345" width="5.909" height="80" fill="black"/><rect x="428.864" y="345" width="2.955" height="80" fill="black"/><rect x="434.773" y="345" width="8.864" height="80" fill="black"/><rect x="449.545" y="345" width="2.955" height="80" fill="black"/><rect x="464.318" y="345" width="5.909" height="80" fill="black"/><rect x="476.136" y="345" width="2.955" height="80" fill="black"/><rect x="482.045" y="345" width="5.909" height="80" fill="black"/><rect x="496.818" y="345" width="2.955" height="80" fill="black"/><rect x="508.636" y="345" width="2.955" height="80" fill="black"/><rect x="514.545" y="345" width="2.955" height="80" fill="black"/><rect x="520.455" y="345" width="5.909" height="80" fill="black"/><rect x="538.182" y="345" width="2.955" height="80" fill="black"/><rect x="547.045" y="345" width="11.818" height="80" fill="black"/><rect x="561.818" y="345" width="2.955" height="80" fill="black"/><rect x="570.682" y="345" width="2.955" height="80" fill="black"/><rect x="579.545" y="345" width="2.955" height="80" fill="black"/><rect x="591.364" y="345" width="5.909" height="80" fill="black"/><rect x="600.227" y="345" width="2.955" height="80" fill="black"/><rect x="612.045" y="345" width="2.955" height="80" fill="black"/><rect x="623.864" y="345" width="11.818" height="80" fill="black"/><rect x="638.636" y="345" width="2.955" height="80" fill="black"/><rect x="644.545" y="345" width="5.909" height="80" fill="black"/><rect x="656.364" y="345" width="5.909" height="80" fill="black"/><rect x="668.182" y="345" width="5.909" height="80" fill="black"/><rect x="677.045" y="345" width="2.955" height="80" fill="black"/><rect x="685.909" y="345" width="5.909" height="80" fill="black"/><rect x="694.773" y="345" width="8.864" height="80" fill="black"/><rect x="709.545" y="345" width="2.955" height="80" fill="black"/><rect x="715.455" y="345" width="11.818" height="80" fill="black"/><rect x="730.227" y="345" width="8.864" height="80" fill="black"/><rect x="742.045" y="345" width="5.909" height="80" fill="black"/><rect x="753.864" y="345" width="8.864" height="80" fill="black"/><rect x="765.682" y="345" width="2.955" height="80" fill="black"/><rect x="774.545" y="345" width="11.818" height="80" fill="black"/><rect x="795.227" y="345" width="2.955" height="80" fill="black"/><rect x="801.136" y="345" width="2.955" height="80" fill="black"/><rect x="807.045" y="345" width="5.909" height="80" fill="black"/><rect x="821.818" y="345" width="8.864" height="80" fill="black"/><rect x="833.636" y="345" width="2.955" height="80" fill="black"/><rect x="839.545" y="345" width="5.909" height="80" fill="black"/><text x="125" y="406" text-anchor="start" font-family="Arial,sans-serif" font-size="64" font-weight="700" textLength="220" lengthAdjust="spacingAndGlyphs">SKU:902136</text><text x="500" y="724" text-anchor="middle" fill="#526779" font-size="22">左侧SKU＋后六位 · 右侧条码扫描完整SKU</text><text x="500" y="757" text-anchor="middle" fill="#526779" font-size="21">左右内边距 2.5mm · 上下内边距 4mm</text></svg><p class="tip">彩色框用于区分元素，实际标签无彩色框。文字高度和总留白随内容换行、库位缩放而变化。</p></div><div class="element-guide"><article style="--accent:#3b82f6"><h3>① 商品名称　<strong>11pt · 加粗700</strong></h3><p>完整显示，自动换行；两端对齐，最后一行居中。内部行高：11pt＋2mm，约16.67pt。</p></article><article style="--accent:#10b981"><h3>② 规格　<strong>15pt · 加粗700</strong></h3><p>位于商品名称下方，居中，显示“规格：”，保留手动换行。过长的行横向压缩；为空时整行隐藏。内部行高约20.67pt。</p></article><article style="--accent:#8b5cf6"><h3>③ SKU　<strong>18pt · 加粗700</strong></h3><p>规格下方左侧显示“SKU:”及后六位，前缀与后六位紧密连排，中间不插入空格；统一18pt、加粗700、不换行；与右侧条码垂直居中。文字行高19.8pt。空间不足时整组文字统一横向收紧，最低60%，条码保持52mm宽度。</p></article><article style="--accent:#8b5cf6"><h3>④ SKU条形码　<strong>Code 128 · 52 × 8mm</strong></h3><p>放在SKU文字右侧，与左侧SKU文字相隔1mm。扫码得到完整SKU，不截取后六位。整组保持同一行；超出可用宽度时提示调整。纯数字SKU采用紧凑编码，保留前导零；支持英文字母、数字和英文符号。条码固定宽52mm、高8mm；左右静区各10个模块，单个、批量打印和PDF均包含。编码过长，无法在52mm内保留至少0.25mm的模块宽度时提示修改。</p></article><article style="--accent:#f97316"><h3>⑤ 库位　<strong>54pt · 特粗900</strong></h3><p>位于标签最下面，居中，不加“库位：”，不换行。过长或标签高度不足时每次缩小0.5pt，最低16pt。行高为当前字号的1倍。</p></article><table class="settings-table"><tbody><tr><th>排列顺序</th><td>名称 → 规格 → SKU组（SKU＋后六位文字 → 完整条码）→ 库位</td></tr><tr><th>元素之间的间隔</th><td>统一1mm；与文字内部行高不同</td></tr><tr><th>上下留白</th><td>内容整体居中；内边距各4mm，内容过高时减为2.5mm</td></tr><tr><th>字体</th><td>Arial / 微软雅黑 / 系统可用字体</td></tr><tr><th>必填信息</th><td>商品名称、SKU、库位；规格选填</td></tr><tr><th>打印设置</th><td>每张独立一页，80×60mm、100%实际大小、无边距、关闭页眉页脚</td></tr></tbody></table></div></div></section><section class="panel" id="statusPanel"><details><summary>打印设置说明</summary><p class="tip">打印设置：80×60毫米纸张、100%实际大小、无边距，关闭页眉页脚。每张标签独立一页。需在连接标签打印机的电脑浏览器中打开。内容仅在本机处理。</p></details><p id="status" role="status"></p><button id="cancelImport" hidden type="button" class="secondary">取消导入</button></section><div class="preview-heading" id="previewHeading">标签预览</div><div class="sheet" id="sheet"></div></main><script>
 const $=id=>document.getElementById(id);let data=[],warnings='',currentView='single',batchCatalogRevision=null;const fields=['name','sku','spec','loc','qty'];
 function message(s){$('status').textContent=s;if($('batchStatus'))$('batchStatus').textContent=s}function qty(v){const n=Number(v||1);if(!Number.isInteger(n)||n<1||n>500)throw Error('打印份数必须为1至500的整数');return n}
 
-// QNH connection toolbar start
-const qnhLocalMode=['127.0.0.1','localhost'].includes(location.hostname);
-const qnhPortKey='label-qnh-connection-port';
-let qnhConnectionActive=qnhLocalMode,qnhConnectionTimer,qnhChecking=false,qnhOpening=false,qnhBackendBusy=false,qnhCheckDelay=5000;
-try{$('qnhLocalPort').value=qnhLocalMode?(location.port||'80'):(localStorage.getItem(qnhPortKey)||'18765')}catch{$('qnhLocalPort').value='18765'}
-$('qnhLocalPort').disabled=qnhLocalMode;
-function updateQnhLocalLink(){
- const link=$('qnhLocalLink');link.hidden=qnhLocalMode;
- try{link.href=qnhServiceBase()+'/#single'}catch{link.hidden=true}
-}
-function qnhServiceBase(){
- if(qnhLocalMode)return '';
- const port=Number($('qnhLocalPort').value);
- if(!Number.isInteger(port)||port<1024||port>65535)throw Error('本地端口请输入1024至65535之间的整数。');
- return 'http://127.0.0.1:'+port;
-}
-updateQnhLocalLink();
-// Local service launcher start
-let localServiceTimer,localServiceChecking=false,localServiceLaunching=false,localServiceDeadline=0;
-function localServicePort(){
- const value=Number(qnhLocalMode?(location.port||'80'):$('qnhLocalPort').value);
- if(!Number.isInteger(value)||value<1024||value>65535)throw Error('本地端口请输入1024至65535之间的整数。');
- return value;
-}
-function updateLocalServiceLink(){
- try{$('localServiceStart').href='qnh-label://start?port='+localServicePort()}
- catch(error){paintLocalService('unavailable',error.message)}
-}
-function paintLocalService(state,hint){
- const labels={checking:'正在检测本地服务…',starting:'等待本地服务启动…',connected:'本地服务已连接',unavailable:'本地服务未连接'};
- $('localServiceStatus').textContent=labels[state]||labels.unavailable;
- $('localServiceStatus').dataset.state=state==='starting'?'connecting':state;
- $('localServiceStart').setAttribute('aria-disabled',String(localServiceLaunching));
- $('localServiceHint').textContent=hint||(state==='connected'?'服务正在运行，可连接牵牛花、更新数据或打印。':state==='starting'?'浏览器提示打开程序时，请选择“打开”；正在等待服务响应。':'首次使用先运行此文件夹的 start.bat 一次，之后可点击按钮启动服务。');
-}
-async function localServiceHealth(){
- const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),2500);
- try{
-  const response=await fetch(qnhServiceBase()+'/api/health',{cache:'no-store',credentials:'omit',mode:'cors',targetAddressSpace:'loopback',signal:controller.signal});
-  const value=await response.json();
-  if(!response.ok||value.app!=='local-label-sync'||value.port!==localServicePort())throw Error('此端口没有可用的本地标签服务。');
-  return value;
- }finally{clearTimeout(timeout)}
-}
-function scheduleLocalServiceCheck(){
- clearTimeout(localServiceTimer);
- localServiceTimer=setTimeout(checkLocalService,localServiceLaunching?1000:10000);
-}
-async function checkLocalService(){
- if(localServiceChecking)return;
- if(document.hidden&&!localServiceLaunching){scheduleLocalServiceCheck();return}
- localServiceChecking=true;
- try{
-  await localServiceHealth();
-  const launched=localServiceLaunching;
-  localServiceLaunching=false;paintLocalService('connected');
-  if(launched&&location.protocol!=='file:'){qnhConnectionActive=true;refreshQnhConnection()}
- }catch(error){
-  if(localServiceLaunching&&Date.now()<localServiceDeadline)paintLocalService('starting');
-  else{
-   const timedOut=localServiceLaunching;localServiceLaunching=false;
-   paintLocalService('unavailable',timedOut?'尚未检测到服务。请先运行此文件夹的 start.bat 完成首次设置，再点击“连接本地服务”；启动失败可查看 startup.log。':undefined);
-  }
- }finally{localServiceChecking=false;scheduleLocalServiceCheck()}
-}
-$('localServiceStart').onclick=event=>{
- if(localServiceLaunching){event.preventDefault();return}
- try{updateLocalServiceLink();localServicePort()}catch(error){event.preventDefault();paintLocalService('unavailable',error.message);return}
- localServiceLaunching=true;localServiceDeadline=Date.now()+30000;
- paintLocalService('starting');clearTimeout(localServiceTimer);
- localServiceTimer=setTimeout(checkLocalService,1000);
- // Let the anchor navigate during this click so the browser can ask to open the registered program.
-};
-$('localServiceStart').onkeydown=event=>{if(event.key===' '){event.preventDefault();$('localServiceStart').click()}};
-updateLocalServiceLink();checkLocalService();
-document.addEventListener('visibilitychange',()=>{if(!document.hidden){clearTimeout(localServiceTimer);checkLocalService()}});
-// Local service launcher end
 
-function paintQnhConnection(state){
- const labels={disconnected:'未连接',connecting:'正在连接',waiting_login:'等待登录',connected:'已连接',expired:'登录失效',checking:'检测中',unavailable:'本地服务未连接',error:'连接失败'};
- const connection=state.connection||'checking',badge=$('qnhConnection');
- badge.textContent=state.busy&&connection==='connected'?'已连接 · 更新中':(labels[connection]||'状态未知');
- badge.dataset.state=connection;
- $('qnhConnectionHint').textContent=state.connectionMessage||'请启动新版程序，以检测牵牛花连接状态。';
- if(state.busy!==undefined)qnhBackendBusy=Boolean(state.busy);
- $('qnhConnect').disabled=qnhOpening||qnhBackendBusy||qnhChecking;
- badge.title=state.checkedAt?'最近检测：'+new Date(state.checkedAt).toLocaleTimeString('zh-CN'):'';
- const loginLabels={logged_in:'已登录',waiting_login:'等待登录',expired:'登录失效',unknown:'待确认',disconnected:'窗口未打开',unavailable:'检测中断'};
- const loginStatus=state.loginStatus||'unknown';
- $('qnhLoginBadge').textContent=loginLabels[loginStatus]||'待确认';
- $('qnhLoginBadge').dataset.state=loginStatus;
- $('qnhLoginBadge').title=state.lastAuthenticatedAt?'上次确认登录：'+new Date(state.lastAuthenticatedAt).toLocaleString('zh-CN'):'';
- $('qnhLoginChecked').textContent=state.checkedAt?'最近检测 '+new Date(state.checkedAt).toLocaleTimeString('zh-CN'):'等待检测';
- $('qnhLoginCheck').disabled=qnhOpening||qnhChecking;
-}
-function qnhConnectionFailure(error){
- clearTimeout(qnhConnectionTimer);qnhCheckDelay=10000;
- const detail=error.name==='AbortError'?'连接请求超时。':error.name==='TypeError'?'无法连接本机程序。':error.message;
- const help='先点击上方“连接本地服务”；首次使用需运行此文件夹的 start.bat 一次。服务启动后再连接牵牛花；若端口不同，在“连接设置”中修改。';
- paintQnhConnection({connection:'unavailable',loginStatus:'unavailable',busy:false,connectionMessage:detail+' '+help});
-}
-async function qnhConnectionApi(endpoint,body){
- const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),endpoint==='/api/open'?60000:15000);
- try{
-  const response=await fetch(qnhServiceBase()+endpoint,{cache:'no-store',credentials:'omit',mode:'cors',targetAddressSpace:'loopback',signal:controller.signal,...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Label-Action':'1'},body:JSON.stringify(body)})});
-  let result;try{result=await response.json()}catch{throw Error('这个端口未运行新版标签连接程序。')}
-  if(!response.ok)throw Error(result.error||'牵牛花连接请求失败。');
-  if(result.app!=='local-label-sync'||typeof result.connection!=='string')throw Error('本地连接组件需要更新。');
-  if(typeof result.loginStatus!=='string')throw Error('请更新 connector.cjs 和 server.cjs，并重启本地程序以启用登录监控。');
-  return result;
- }finally{clearTimeout(timeout)}
-}
-function scheduleQnhConnectionCheck(){
- clearTimeout(qnhConnectionTimer);
- if(qnhConnectionActive&&!document.hidden)qnhConnectionTimer=setTimeout(refreshQnhConnection,qnhCheckDelay);
-}
-async function refreshQnhConnection(){
- if(!qnhConnectionActive||qnhChecking||qnhOpening||document.hidden)return;
- qnhChecking=true;$('qnhConnect').disabled=true;$('qnhLoginCheck').disabled=true;
- try{const state=await qnhConnectionApi('/api/status');paintQnhConnection(state);qnhCheckDelay=5000;if(qnhLocalMode&&state.revision&&state.revision!==catalogRevision)await loadLocalCatalog()}
- catch(error){qnhConnectionFailure(error)}
- finally{qnhChecking=false;$('qnhConnect').disabled=qnhOpening||qnhBackendBusy;$('qnhLoginCheck').disabled=qnhOpening;scheduleQnhConnectionCheck()}
-}
-function beginQnhConnectionPolling(){qnhConnectionActive=true;scheduleQnhConnectionCheck()}
-$('qnhLoginCheck').onclick=async()=>{qnhConnectionActive=true;await refreshQnhConnection()};
-$('qnhConnect').onclick=async()=>{
- if(qnhOpening||qnhChecking)return;
- qnhOpening=true;qnhConnectionActive=true;clearTimeout(qnhConnectionTimer);paintQnhConnection({connection:'connecting',busy:false,connectionMessage:'正在连接本地牵牛花组件…'});
- let serviceAvailable=false;
- try{
-  const state=await qnhConnectionApi('/api/status');serviceAvailable=true;qnhConnectionActive=true;
-  if(state.busy){paintQnhConnection(state);return}
-  const opened=await qnhConnectionApi('/api/open',{});
-  paintQnhConnection(opened);qnhConnectionActive=true;
- }catch(error){
-  if(serviceAvailable){paintQnhConnection({connection:'error',busy:false,connectionMessage:error.message});qnhConnectionActive=true}
-  else qnhConnectionFailure(error);
- }finally{qnhOpening=false;$('qnhConnect').disabled=qnhBackendBusy;$('qnhLoginCheck').disabled=qnhChecking;scheduleQnhConnectionCheck()}
-};
-$('qnhLocalPort').onchange=()=>{
- if(qnhLocalMode)return;
- qnhConnectionActive=false;clearTimeout(qnhConnectionTimer);
- updateQnhLocalLink();updateLocalServiceLink();checkLocalService();
- try{qnhServiceBase();localStorage.setItem(qnhPortKey,$('qnhLocalPort').value);paintQnhConnection({connection:'disconnected',busy:false,connectionMessage:'连接地址已修改，点击连接牵牛花重新连接。'})}
- catch(error){paintQnhConnection({connection:'error',busy:false,connectionMessage:error.message})}
-};
-document.addEventListener('visibilitychange',()=>{if(document.hidden)clearTimeout(qnhConnectionTimer);else if(qnhConnectionActive)refreshQnhConnection()});
-scheduleQnhConnectionCheck();
-// QNH connection toolbar end
 
 const locationPatterns=["BaBbBb","BbBaBb","BbBbBa","AbAbBc","AbAcBb","AcAbBb","AbBbAc","AbBcAb","AcBbAb","BbAbAc","BbAcAb","BcAbAb","AaBbCb","AbBaCb","AbBbCa","AaCbBb","AbCaBb","AbCbBa","BbCbAa","BbAaCb","BbAbCa","BaCbAb","BbCaAb","CaBaCa","CaAbBb","CbAaBb","CbAbBa","CaBbAb","CbBaAb","CbBbAa","BaBaBc","BaBcBa","BcBaBa","AaAcBc","AcAaBc","AcAcBa","AaBcAc","AcBaAc","AcBcAa","BaAcAc","BcAaAc","BcAcAa","AaBaCc","AaBcCa","AcBaCa","AaCaBc","AaCcBa","AcCaBa","CaCaBa","BaAcCa","BcAaCa","BaCaAc","BaCcAa","BaCaCa","CaAaBc","CaAcBa","CcAaBa","CaBaAc","CaBcAa","CcBaAa","CaDaAa","BbAdAa","DcAaAa","AaAbBd","AaAdBb","AbAaBd","AbAdBa","AdAaBb","AdAbBa","AaBbAd","AaBdAb","AbBaAd","AbBdAa","AdBaAb","AdBbAa","BdAbAa","BbAaAd","DaCaAa","BdAaAb","AcDaAa","AaAbDb","AbAaDb","AbAbDa","AaDbAb","AbDaAb","AbDbAa","DaAbAb","DbAaAb","DbAbAa","BaBaDa","BaDaBa","DaBaBa","AaAaDc","AaAcDa","AcAaDa","AaDaAc","AaDcAa","DaAaAc","DaAcAa","AaCaDa","AaDaCa","CaAaDa","DaAaCa","BaAdAb","BaAbAd","BaAbCb","BcCaAaB"];
 function code128Barcode(value,label,compactNumeric=false){
@@ -245,24 +94,18 @@ $('catalogApply').onclick=async()=>{
   const mapping=Object.fromEntries(['name','sku','spec','loc'].map(key=>[key,Number($('map-'+key).value)]));
   const next=mapCatalog(catalogBooks[Number($('catalogTabs').value)].rows,mapping);
   if(!next.length)throw Error('该工作表没有可用商品');
-  const now=new Date();const saved=qnhLocalMode?await localApi('/api/import',{rows:next}):{rows:next,revision:now.toISOString(),updated:now.toLocaleString('zh-CN'),source:'手动上传的商品库'};
+  const now=new Date();const saved={rows:next,revision:now.toISOString(),updated:now.toLocaleString('zh-CN'),source:'本地上传：'+($('catalogFile').files[0]?.name||'商品库文件')};
+ try{localStorage.setItem(catalogKey,JSON.stringify(saved))}catch{throw Error('无法保存商品库，请检查浏览器存储空间或权限；原商品库保持不变。')}
   useLocalCatalog(saved);$('catalogMapping').hidden=true;
-  $('qnhStatus').textContent='导出文件已保存到本机；继续使用缓存，直到再次更新或手动导入。';
+  $('catalogStatus').textContent='文件已导入并保存，共 '+catalogData.length.toLocaleString('zh-CN')+' 个商品，可搜索和打印。需要更新时再次上传本地文件。';
   message('商品库已替换，共 '+catalogData.length+' 个商品。'+(catalogWarning?'\n'+catalogWarning:''));
  }catch(error){message('导入失败：'+error.message)}finally{button.disabled=false}
 };
 
-let catalogRevision='',syncTimer,syncPolling=false,catalogLoading=false,seedLoading,syncWatching=false,syncState={};
-async function localApi(url,body){
- const response=await fetch(qnhServiceBase()+url,{credentials:'omit',mode:'cors',targetAddressSpace:'loopback',cache:'no-store',...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Label-Action':'1'},body:JSON.stringify(body)})});
- if(response.status===404||response.status===403)throw Error('当前地址没有可用的商品库接口；实时更新需要通过当前项目的 start.bat 打开网页。');
- let result;try{result=await response.json()}catch{throw Error('当前页面没有连接到本地商品库服务，请运行本地新版 start.bat。')}
- if(!response.ok)throw Error(result.error||'本地服务请求失败');return result;
-}
+let catalogRevision='';
 function useLocalCatalog(saved){
- if(!saved||!Array.isArray(saved.rows)||!saved.rows.length||saved.rows.some(r=>!r||['name','sku','spec','loc'].some(key=>typeof r[key]!=='string')))throw Error('缓存为空或格式无效，当前商品库保持不变。');
+ if(!saved||!Array.isArray(saved.rows)||!saved.rows.length||saved.rows.some(r=>!r||['name','sku','spec','loc'].some(key=>typeof r[key]!=='string')))throw Error('商品库为空或格式无效，当前商品库保持不变。');
  catalogData=saved.rows;catalogRevision=saved.revision||'';
- try{localStorage.setItem(catalogKey,JSON.stringify(saved))}catch{}
  $('catalogCount').textContent=catalogData.length.toLocaleString('zh-CN');
  $('catalogUpdated').textContent=saved.updated||'未知';
  const missing=catalogData.filter(r=>!r.loc.trim()).length;
@@ -270,52 +113,27 @@ function useLocalCatalog(saved){
  searchCatalog();
  if(currentView==='batch')loadBatchCatalog();
 }
-async function loadLocalCatalog(){const saved=await localApi('/api/catalog');useLocalCatalog(saved)}
-function syncButtons(busy){$('catalogManualUpload').disabled=busy;$('qnhUpdate').disabled=busy;$('catalogApply').disabled=busy;$('qnhUpdate').textContent=busy?'正在更新…':'更新数据';$('qnhPause').disabled=!busy||!syncState.canPauseRefresh;$('qnhPause').textContent=syncState.refreshPaused?'继续检查':'暂停任务刷新'}
-async function pollSync(){
- if(syncPolling){if(syncWatching)syncTimer=setTimeout(pollSync,1500);return}syncPolling=true;clearTimeout(syncTimer);
+function reloadCatalog(){
  try{
-  const state=await localApi('/api/status');syncState=state;paintQnhConnection(state);$('qnhStatus').textContent=state.message;syncButtons(state.busy);
-  if(state.revision!==catalogRevision)await loadLocalCatalog();
-  if(state.busy){syncWatching=true;syncTimer=setTimeout(pollSync,1500)}
-  else syncWatching=false;
- }catch(error){$('qnhStatus').textContent='状态读取中断：'+error.message+' 当前缓存继续可用。'+(syncWatching?'正在重试读取更新结果。':'点击重试读取缓存可重新检查。');if(syncWatching)syncTimer=setTimeout(pollSync,5000);else syncButtons(false)}
- finally{syncPolling=false}
-}
-function loadPackagedCatalog(){
- if(!qnhLocalMode)return Promise.reject(Error('请点击手动上传商品库，选择Excel或CSV文件。'));
- if(window.LABEL_INITIAL_CATALOG)return Promise.resolve(window.LABEL_INITIAL_CATALOG);
- const embedded=$('embeddedCatalog');
- if(embedded&&embedded.textContent.trim()){
-  try{const saved=JSON.parse(embedded.textContent);if(saved&&Array.isArray(saved.rows)&&saved.rows.length&&saved.rows.every(row=>row&&['name','sku','spec','loc'].every(key=>typeof row[key]==='string'))){window.LABEL_INITIAL_CATALOG=saved;return Promise.resolve(saved)}}catch{}
+  const saved=JSON.parse(localStorage.getItem(catalogKey)||'null');
+  if(saved){
+   useLocalCatalog(saved);
+   $('catalogStatus').textContent='已读取保存的商品库，共 '+catalogData.length.toLocaleString('zh-CN')+' 个商品，可搜索和打印。需要更新时上传本地文件。';
+  }else if(!catalogData.length){
+   $('catalogCount').textContent='0';$('catalogUpdated').textContent='尚未导入';
+   catalogInfo('尚未载入商品数据。');
+   $('catalogStatus').textContent='点击“本地上传文件”，选择Excel或CSV商品库并确认导入。';
+  }else{
+   $('catalogStatus').textContent='当前商品库可继续使用。上传本地文件可重新保存商品库。';
+  }
+ }catch(error){
+  if(!catalogData.length){$('catalogCount').textContent='0';$('catalogUpdated').textContent='未读取';catalogInfo('请重新上传本地商品库文件。')}
+  $('catalogStatus').textContent='读取已保存商品库失败：'+error.message+(catalogData.length?' 当前商品库继续可用。':' 请上传本地文件。');
  }
- if(!seedLoading)seedLoading=new Promise((resolve,reject)=>{
-  const script=document.createElement('script');script.src='catalog-seed.js';
-  script.onload=()=>window.LABEL_INITIAL_CATALOG?resolve(window.LABEL_INITIAL_CATALOG):reject(Error('预置缓存格式无效'));
-  script.onerror=()=>{seedLoading=null;script.remove();reject(Error('备用缓存未载入，请使用当前项目的完整网页文件'))};document.head.append(script);
- });
- return seedLoading;
-}
-async function reloadCatalog(){
- if(catalogLoading)return;catalogLoading=true;$('catalogReload').disabled=true;
- $('qnhStatus').textContent='正在读取已保存的数据，不会触发导出…';
- try{await loadLocalCatalog();await pollSync()}
- catch(error){
-  if(!catalogData.length){try{useLocalCatalog(await loadPackagedCatalog())}catch(seedError){$('catalogUpdated').textContent='未读取';catalogInfo('尚未载入商品数据。');$('qnhStatus').textContent='读取失败：'+error.message+' '+seedError.message;return}}
-  $('qnhStatus').textContent='已加载缓存，共 '+catalogData.length+' 个商品，可搜索和打印。\n更新服务暂未连接：'+error.message;
- }finally{catalogLoading=false;$('catalogReload').disabled=false}
+ searchCatalog();
+ if(currentView==='batch')loadBatchCatalog();
 }
 $('catalogReload').onclick=reloadCatalog;
-$('qnhUpdate').onclick=async()=>{
- syncWatching=true;syncButtons(true);$('qnhStatus').textContent='正在请求更新；原商品库可继续搜索和打印。';
- try{await localApi('/api/update',{});await pollSync()}
- catch(error){syncWatching=false;syncButtons(false);$('qnhStatus').textContent='更新未开始：'+error.message+' 原缓存继续可用。'}
-};
-$('qnhPause').onclick=async()=>{
- $('qnhPause').disabled=true;
- try{await localApi(syncState.refreshPaused?'/api/resume-refresh':'/api/pause-refresh',{});syncWatching=true;await pollSync()}
- catch(error){$('qnhStatus').textContent=error.message;syncButtons(Boolean(syncState.busy))}
-};
 function loadBatchCatalog(force=false){
  if(!catalogData.length){
   $('batchSource').textContent='商品库尚未载入，请查看上方商品库状态。';
@@ -328,13 +146,12 @@ function loadBatchCatalog(force=false){
  $('batchSource').textContent='使用当前商品库，共 '+data.length.toLocaleString('zh-CN')+' 个商品。筛选库位，勾选商品并设置份数后直接打印。';
 }
 $('catalogBatch').onclick=()=>{
- if(!catalogData.length){message('商品库为空，请先导入或更新数据。');return}
+ if(!catalogData.length){message('商品库为空，请先上传本地文件并确认导入。');return}
  loadBatchCatalog(true);setView('batch');
  message('已重新载入商品库，共 '+data.length+' 个商品，请勾选需要打印的商品。');
 };
-// GET-only startup: use saved browser data, then disk cache, then the packaged export.
-try{const saved=JSON.parse(localStorage.getItem(catalogKey)||'null');if(saved)useLocalCatalog(saved);else catalogInfo('正在读取本地缓存…')}catch{catalogInfo('正在读取本地缓存…')}
-searchCatalog();reloadCatalog();
+// Restore the browser catalog without connecting to external or local services.
+reloadCatalog();
 
 function bindDrop(zoneId,inputId){const zone=$(zoneId),input=$(inputId);let depth=0;zone.addEventListener('keydown',event=>{if(event.target===zone&&(event.key==='Enter'||event.key===' ')){event.preventDefault();input.click()}});zone.addEventListener('dragenter',event=>{event.preventDefault();depth++;zone.classList.add('active')});zone.addEventListener('dragover',event=>{event.preventDefault();event.dataTransfer.dropEffect='copy'});zone.addEventListener('dragleave',event=>{event.preventDefault();if(--depth<=0){depth=0;zone.classList.remove('active')}});zone.addEventListener('drop',event=>{event.preventDefault();depth=0;zone.classList.remove('active');const files=event.dataTransfer.files;if(files.length!==1){message('请一次拖入一个Excel或CSV文件。');return}if(!/\.(xlsx|xls|csv)$/i.test(files[0].name)){message('仅支持.xlsx、.xls或.csv文件。');return}const transfer=new DataTransfer();transfer.items.add(files[0]);input.files=transfer.files;input.dispatchEvent(new Event('change',{bubbles:true}))})}
 bindDrop('catalogDrop','catalogFile');window.addEventListener('dragover',event=>{if(Array.from(event.dataTransfer.types||[]).includes('Files'))event.preventDefault()});window.addEventListener('drop',event=>{if(Array.from(event.dataTransfer.types||[]).includes('Files'))event.preventDefault()});
@@ -350,4 +167,3 @@ window.addEventListener('error',event=>{const msg='页面运行错误：'+event.
 function setView(view){if(!['single','batch','settings'].includes(view))view='single';currentView=view;for(const key of ['single','batch','settings'])$(key+'Panel').hidden=key!==view;document.querySelectorAll('.app-nav button').forEach(button=>{const active=button.dataset.view===view;button.classList.toggle('active',active);button.setAttribute('aria-current',active?'page':'false')});$('sheet').hidden=view==='settings';$('previewHeading').hidden=view==='settings';if(view==='single')action(false,false);else if(view==='batch'){$('sheet').replaceChildren();loadBatchCatalog();table()}history.replaceState(null,'','#'+view)}
 document.querySelectorAll('.app-nav button').forEach(button=>button.addEventListener('click',()=>setView(button.dataset.view)));setView(location.hash.slice(1)||'single');
 </script></html>
-
