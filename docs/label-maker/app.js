@@ -1,6 +1,6 @@
-import {renderLabel,encodePng,parseProductText,parseScreenshotText,mergeProductSources} from './label.js?v=20261015-3';
+import {renderLabel,encodePng,parseProductText,parseScreenshotText,mergeProductSources} from './label.js?v=20261015-6';
 import {prepareLabelImage,saveLabelImage,shareLabelImage,capabilities,cleanup} from './save-image.js?v=20261015-2';
-import {ensureAssetCache} from './asset-cache.js?v=20261015-5';
+import {ensureAssetCache} from './asset-cache.js?v=20261015-6';
 
 void ensureAssetCache();
 
@@ -12,13 +12,14 @@ const recognitionCache=new WeakMap();
 let saveFocus=null;
 let recognitionRuntime=null,autoTimer=null,autoQueued=false,autoSubmitting=false;
 function loadRecognitionRuntime(){
-  if(!recognitionRuntime)recognitionRuntime=import('./ocr.js?v=20261015-5').catch(error=>{recognitionRuntime=null;throw error;});
+  if(!recognitionRuntime)recognitionRuntime=import('./ocr.js?v=20261015-6').catch(error=>{recognitionRuntime=null;throw error;});
   return recognitionRuntime;
 }
 function warmRecognition(){
   try{const known=mergeProductSources(parseProductText($('product-text').value.trim()),{});if(!known.name||!known.spec||!/^\d{10,64}$/.test(known.sku)||known.loc)return;}catch{return;}
-  // Prepare the small matcher without downloading the fallback engine/model.
-  void loadRecognitionRuntime().catch(()=>{});
+  // All numeric SKU/location screenshots share the same coding engine, so
+  // prepare it while the image picker is open and reuse it across products.
+  void loadRecognitionRuntime().then(module=>module.warmupRecognition({mode:'location'})).catch(()=>{});
 }
 function queueAutoGeneration(){
   clearTimeout(autoTimer);autoQueued=false;
@@ -102,7 +103,21 @@ $('product-text').addEventListener('input',()=>{markDirty();if(imageFile)warmRec
 $('add-image').onclick=()=>{warmRecognition();$('image-file').click();};
 $('image-file').onchange=()=>attachImage($('image-file').files[0]);
 $('remove-image').onclick=removeImage;
-$('clear-input').onclick=()=>{$('product-text').value='';removeImage();$('product-text').focus();};
+function clearAll(){
+  $('product-text').value='';removeImage();cleanup();
+  hasPreview=false;filename='';
+  $('label-paper').querySelectorAll('canvas').forEach(canvas=>canvas.remove());
+  $('empty-preview').hidden=false;$('dirty-overlay').hidden=true;
+  $('preview-state').textContent='等待生成';$('preview-state').classList.remove('ready');
+  $('record-summary').replaceChildren();$('ocr-text').textContent='';
+  $('recognition-note').textContent='';$('image-name').textContent='';
+  $('form-error').textContent='';$('render-warning').textContent='';$('image-fallback').removeAttribute('href');
+  $('recognition-progress').hidden=true;$('progress-bar').value=0;
+  status('已清空文字和截图，可以放入下一件商品。');
+  $('product-text').focus();
+}
+$('clear-input').onclick=clearAll;
+$('clear-all').onclick=clearAll;
 $('product-text').addEventListener('paste',event=>{
   const file=[...(event.clipboardData?.files||[])].find(item=>item.type.startsWith('image/'));
   if(!file)return;
@@ -165,8 +180,10 @@ $('product-form').addEventListener('submit',async event=>{
           // different product. Retry OCR for that target instead of reusing a
           // failed association; exact-context failures still remain cached.
           if(imageText!==undefined){
-            const candidate=parseScreenshotText(imageText,{product:known});
-            if(!candidate.matchError&&(!(known.sku||known.name)||candidate.matchedBy))cachedText=imageText;
+            const candidate=mode==='location'&&/^\d{10,64}$/.test(known.sku)
+              ? (await loadRecognitionRuntime()).validateKnownSkuText(imageText,known.sku,parseScreenshotText)
+              : parseScreenshotText(imageText,{product:known});
+            if(candidate&&!candidate.matchError&&(!(known.sku||known.name)||candidate.matchedBy))cachedText=candidate.ocrText||imageText;
           }
         }
         if(cachedText!==undefined){
@@ -212,6 +229,7 @@ $('product-form').addEventListener('submit',async event=>{
     if(file)$('image-readiness').textContent='已识别，标签可以保存';
     if(window.matchMedia('(max-width:650px)').matches&&(!automatic||document.activeElement!==$('product-text')))$('preview-title').scrollIntoView({behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});
   }catch(error){
+    if(expectedRevision!==revision)return;
     if(error.name==='AbortError'||signal.aborted){status('识别已取消，可以修改内容后重试。');if(imageFile)$('image-readiness').textContent='等待识别';return;}
     $('preview-state').textContent='请检查内容';$('dirty-overlay').hidden=!hasPreview;
     showError(error.message||'识别或生成失败，请检查文字和截图后重试。');

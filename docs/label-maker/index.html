@@ -8,7 +8,7 @@
   <title>库位标签 · 图片生成器</title>
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./style.css">
-  <link rel="stylesheet" href="./composer.css?v=20261015-2">
+  <link rel="stylesheet" href="./composer.css?v=20261015-6">
 </head>
 <body>
   <a class="skip" href="#editor">跳到商品信息</a>
@@ -33,9 +33,10 @@
             <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
           </div>
           <p class="field-hint" id="composer-hint">文字和截图齐全后自动识别，也可点击下方按钮。一张图有多个商品时，会按完整 SKU 和商品名称匹配。</p>
-          <div id="recognition-progress" class="recognition-progress" hidden><div><span id="progress-text" role="status" aria-live="polite">正在识别…</span><button id="cancel-recognition" type="button">取消</button></div><progress id="progress-bar" max="1" value="0" aria-label="图片识别进度"></progress><small>完整文字配库存截图会优先快速匹配；其它图片首次需加载识别资源。</small></div>
+          <div id="recognition-progress" class="recognition-progress" hidden><div><span id="progress-text" role="status" aria-live="polite">正在识别…</span><button id="cancel-recognition" type="button">取消</button></div><progress id="progress-bar" max="1" value="0" aria-label="图片识别进度"></progress><small>首次需准备识别组件，换商品会继续复用。文字信息齐全时只读取截图中的库位和编码。</small></div>
           <p id="form-error" class="form-error" role="alert" hidden></p>
           <button class="primary-button" id="generate" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM8 10v4m3-4v4m2-4v4m3-4v4"/></svg><span>识别并生成标签</span><span aria-hidden="true">→</span></button>
+          <button class="clear-all-button" id="clear-all" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7"/></svg>一键清空文字和截图</button>
           <p class="local-note"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 13 4v4c0 3-5 6.5-5 6.5S3 11 3 8V4zM5.5 7.5 7 9l3.5-3.5"/></svg>内容仅在当前浏览器内处理</p>
         </form>
         <section id="recognized-info" class="recognized-info" aria-labelledby="recognized-title" hidden><div class="recognized-head"><h3 id="recognized-title">识别结果</h3><span>保存前请核对</span></div><dl id="record-summary"></dl><p id="recognition-note"></p><details id="ocr-details" hidden><summary>查看图片识别文字</summary><pre id="ocr-text"></pre></details></section>
@@ -69,6 +70,6 @@
       <p class="save-sheet-help">苹果手机可在系统菜单中选“存储图像”或“存储到文件”。若 App 内无法保存，请用 Safari 或手机浏览器打开本页。</p>
     </div>
   </section>
-  <script type="module" src="./app.js?v=20261015-5"></script>
+  <script type="module" src="./app.js?v=20261015-6"></script>
 </body>
 </html>

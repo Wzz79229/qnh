@@ -11,6 +11,7 @@ const ASSETS = new Set([
   'vendor/tesseract/lang/chi_sim.traineddata.gz',
   'vendor/tesseract/lang/eng_codes.traineddata.gz',
 ].map(path => new URL(path, BASE).href));
+const inFlight = new Map();
 
 self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
@@ -25,14 +26,27 @@ async function publicAsset(request) {
     // Blocked storage, eviction and quota errors must not prevent online OCR.
     cache = null;
   }
-  const response = await fetch(request);
-  let store;
-  if (cache && response.type === 'basic' && response.status === 200
-      && !/text\/html/i.test(response.headers.get('content-type') || '')) {
-    try { store = cache.put(request, response.clone()).catch(() => {}); }
-    catch { /* The original network response remains available. */ }
+  let pending = inFlight.get(request.url);
+  if (!pending) {
+    pending = (async () => {
+      const response = await fetch(request);
+      let store;
+      if (cache && response.type === 'basic' && response.status === 200
+          && !/text\/html/i.test(response.headers.get('content-type') || '')) {
+        try { store = cache.put(request, response.clone()).catch(() => {}); }
+        catch { /* The original network response remains available. */ }
+      }
+      return { response, store };
+    })();
+    inFlight.set(request.url, pending);
+    // Keep the shared response until CacheStorage has finished storing it.
+    // The main-thread prefetch and worker import then share one network GET.
+    void pending.then(result => result.store).catch(() => {}).finally(() => {
+      if (inFlight.get(request.url) === pending) inFlight.delete(request.url);
+    });
   }
-  return { response, store };
+  const result = await pending;
+  return { response: result.response.clone(), store: result.store };
 }
 
 self.addEventListener('fetch', event => {

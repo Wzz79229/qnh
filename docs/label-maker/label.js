@@ -22,6 +22,23 @@ function asString(value) {
   return value.trim();
 }
 
+// QNH appends a per-item weight/capacity conversion to the actual specification.
+// Remove only that complete trailing metadata group; option and pack-size groups
+// such as （灰色）, （L码） and （500ml*2瓶） remain part of the specification.
+function cleanSpecification(value) {
+  let text = value.trim();
+  while (text) {
+    const suffix = text.match(/(?:\(([^（）()]*)\)|（([^（）()]*)）)\s*$/);
+    if (!suffix) break;
+    const primary = text.slice(0, suffix.index).trimEnd();
+    if (!primary) break;
+    const metadata = (suffix[1] ?? suffix[2]).normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+    if (!/^(?:(?:净重|重量|净含量)[:：]?)?(?:\d+(?:\.\d+)?|\.\d+)(?:kg|mg|g|千克|公斤|毫克|克|ml|l|毫升|升)\/(?:\d+)?(?:份|瓶|袋|包|盒|罐|桶|箱|杯|支|个|件|套|组|粒|片|条|卷|张|双|只|颗|块|提)$/.test(metadata)) break;
+    text = primary;
+  }
+  return text;
+}
+
 function barcodeFor(sku) {
   if (/\.\.\.|…|⋯/.test(sku)) throw new Error('SKU 中有省略号，请从牵牛花复制完整 SKU 后再生成。');
   if (!/^[\x20-\x7e]+$/.test(sku)) throw new Error('SKU 仅支持英文字母、数字和英文符号，请检查完整 SKU。');
@@ -96,7 +113,7 @@ function drawBarcode(context, barcode, x, y, width, height) {
 export function renderLabel(record) {
   if (!record || typeof record !== 'object') throw new Error('请先填写商品信息。');
   const fields = {
-    name: asString(record.name), spec: asString(record.spec),
+    name: asString(record.name), spec: cleanSpecification(asString(record.spec)),
     sku: asString(record.sku), loc: asString(record.loc)
   };
   if (!fields.name) throw new Error('请填写商品名称。');
@@ -219,7 +236,8 @@ export function parseProductText(text) {
   matches.forEach((match, index) => {
     const key = FIELD_ALIASES[match[1].toLowerCase()];
     const end = index + 1 < matches.length ? matches[index + 1].index : text.length;
-    const value = text.slice(match.index + match[0].length, end).trim();
+    const rawValue = text.slice(match.index + match[0].length, end).trim();
+    const value = key === 'spec' ? cleanSpecification(rawValue) : rawValue;
     if (result[key] && result[key] !== value) result.warnings.push(`同一字段出现了不同内容：${match[1]}。请核对。`);
     result[key] = value;
   });
@@ -279,6 +297,7 @@ function parseSingleScreenshotText(text) {
           value += lines[next++];
         }
       }
+      if (key === 'spec') value = cleanSpecification(value);
       if (key === 'loc') {
         value = normalizedLocation(value) || (value ? '' : normalizedLocation(lines[index + 1] || ''));
         locationIndexes.push(index);
@@ -466,8 +485,8 @@ export function mergeProductSources(textResult, imageResult) {
   const merged = {name: '', spec: '', sku: '', loc: '', upc: '', warnings: [], sources: {}};
   const labels = {name: '商品名称', spec: '规格', sku: 'SKU', loc: '库位', upc: 'UPC'};
   for (const key of ['name', 'spec', 'sku', 'loc', 'upc']) {
-    const textValue = typeof text[key] === 'string' ? text[key].trim() : '';
-    const imageValue = typeof image[key] === 'string' ? image[key].trim() : '';
+    const textValue = typeof text[key] === 'string' ? (key === 'spec' ? cleanSpecification(text[key]) : text[key].trim()) : '';
+    const imageValue = typeof image[key] === 'string' ? (key === 'spec' ? cleanSpecification(image[key]) : image[key].trim()) : '';
     const hasText = Boolean(textValue) && (key !== 'sku' || validSku(textValue));
     const hasImage = Boolean(imageValue) && (key !== 'sku' || validSku(imageValue));
     merged[key] = hasText ? textValue : hasImage ? imageValue : '';
@@ -492,7 +511,7 @@ export function formatProductText(record) {
   const value = record || {};
   const lines = [
     `商品名称：${typeof value.name === 'string' ? value.name : ''}`,
-    `规格：${typeof value.spec === 'string' ? value.spec : ''}`,
+    `规格：${typeof value.spec === 'string' ? cleanSpecification(value.spec) : ''}`,
     `SKU：${typeof value.sku === 'string' ? value.sku : ''}`,
     `库位：${typeof value.loc === 'string' ? value.loc : ''}`
   ];

@@ -1,7 +1,10 @@
 /** Browser-only OCR. Images stay in memory; only bundled OCR assets are loaded. */
-import { parseScreenshotText } from './label.js?v=20261015-3';
-import { ensureAssetCache } from './asset-cache.js?v=20261015-5';
+import { parseScreenshotText } from './label.js?v=20261015-6';
+import { ensureAssetCache } from './asset-cache.js?v=20261015-6';
+import { prepareOcrAssets } from './asset-loader.js?v=20261015-6';
 import { recognizeLocationFast } from './lightweight-location-ocr.js?v=20261015-5';
+import { prepareMetadataSheet, validateMetadataResult, validateKnownSkuText } from './metadata-ocr.js?v=20261015-6';
+export { validateKnownSkuText } from './metadata-ocr.js?v=20261015-6';
 
 const ASSET_ROOT = new URL('./vendor/tesseract/', import.meta.url);
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
@@ -16,6 +19,7 @@ let runtimePromise;
 let activeJob = null;
 let resident = null;
 let idleTimer;
+let templateAttempted = false;
 
 function abortError() {
   return new DOMException('识别已取消。', 'AbortError');
@@ -241,13 +245,20 @@ function idleRelease(entry) {
 }
 
 function createResident(language, runtime) {
-  const entry = { worker: null, promise: null, language, disposed: false, termination: null };
+  const entry = { worker: null, promise: null, language, disposed: false, termination: null, recognizing: false, assetProgress: null };
   resident = entry;
   // Publish the promise before loading the runtime. Foreground OCR can attach
   // to an initializer already started while the image picker was open.
-  entry.promise = (runtime ? Promise.resolve(runtime) : loadRuntime()).then(Tesseract => Tesseract.createWorker(language === 'location' ? ['eng_codes'] : ['chi_sim', 'eng'], 1, {
+  entry.promise = ensureAssetCache().then(() => Promise.all([
+    runtime ? Promise.resolve(runtime) : loadRuntime(),
+    prepareOcrAssets({ mode: language, onProgress: message => {
+      entry.assetProgress = message;
+      const current = activeJob;
+      if (current?.entry === entry && !current.stopped) current.report(message.status, 0.12 + message.progress * 0.30);
+    } }),
+  ])).then(([Tesseract, assets]) => Tesseract.createWorker(language === 'location' ? ['eng_codes'] : ['chi_sim', 'eng'], 1, {
     workerPath: new URL('worker.min.js', ASSET_ROOT).href,
-    corePath: new URL('core/', ASSET_ROOT).href.replace(/\/$/, ''),
+    corePath: assets.coreUrl,
     langPath: new URL('lang/', ASSET_ROOT).href.replace(/\/$/, ''),
     workerBlobURL: false,
     legacyCore: false,
@@ -277,6 +288,14 @@ function createResident(language, runtime) {
     },
   })).then(worker => {
     entry.worker = worker;
+    const recognize = worker.recognize.bind(worker);
+    worker.recognize = (...args) => {
+      entry.recognizing = true;
+      let result;
+      try { result = recognize(...args); }
+      catch (error) { entry.recognizing = false; throw error; }
+      return Promise.resolve(result).finally(() => { entry.recognizing = false; });
+    };
     if (entry.disposed || resident !== entry) {
       void disposeResident(entry);
       throw abortError();
@@ -286,8 +305,8 @@ function createResident(language, runtime) {
     if (resident === entry) resident = null;
     throw error;
   });
-  // Initialization itself cannot be interrupted by Tesseract. A cancelled
-  // initializer is discarded when it resolves and never replaces a new job.
+  // Initializers survive an input-edit cancellation; explicit release and
+  // failed initialization still dispose them before they can replace a job.
   entry.promise.catch(() => {});
   return entry;
 }
@@ -303,6 +322,7 @@ async function acquireWorker(Tesseract, language, job, wait, report) {
   }
   job.entry = entry;
   if (entry.worker) report('识别组件已就绪，正在读取截图', 0.47);
+  else if (entry.assetProgress) report(entry.assetProgress.status, 0.12 + entry.assetProgress.progress * 0.30);
   job.worker = await wait(entry.promise);
   return job.worker;
 }
@@ -400,8 +420,11 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
   const stop = error => {
     if (job.stopped) return;
     job.stopped = true;
+    job.cancelled = error?.name === 'AbortError';
     rejectStopped(error);
-    if (job.entry) void disposeResident(job.entry);
+    // Editing the product while assets are loading must not discard that
+    // shared initializer. A running OCR operation still requires termination.
+    if (job.entry && (!job.cancelled || job.entry.recognizing)) void disposeResident(job.entry);
   };
   const cancel = () => stop(abortError());
   const wait = promise => Promise.race([promise, stopped]);
@@ -411,7 +434,11 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
   const timeout = setTimeout(() => stop(new Error('本地识别耗时过长，请裁剪截图后重试。')), 180_000);
   try {
     report('正在准备截图', 0.02);
-    if (targetedFastPass) {
+    if (targetedFastPass && !resident?.worker && !templateAttempted) {
+      templateAttempted = true;
+      // Preparation is shared with subsequent products, including locations
+      // that cannot use the optional lightweight first-picture shortcut.
+      void warmupRecognition({ mode: 'location' });
       report('正在快速核对截图中的库位和 SKU', 0.04);
       const fast = await wait(recognizeLocationFast(file, { sku: matchingProduct.sku, signal }));
       if (job.stopped || signal?.aborted) throw abortError();
@@ -429,8 +456,48 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
     if (typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') {
       throw new Error('当前浏览器不支持本地识别，请使用新版 Safari 或 Chrome。');
     }
-    const compact = targetedFastPass ? await prepareCompactCards(file, signal, wait) : null;
-    let image = compact || await prepareImage(file, signal, wait, job.mode, targetedFastPass);
+    if (targetedFastPass) {
+      const metadata = await wait(prepareMetadataSheet(file, { signal }));
+      let image = metadata?.blob || await prepareImage(file, signal, wait, 'location', true);
+      job.stage = '加载组件';
+      report('正在准备图片识别，组件会在换商品后继续复用', 0.08);
+      const Tesseract = await wait(loadRuntime());
+      await acquireWorker(Tesseract, 'location', job, wait, report);
+      job.stage = '识别文字';
+      await wait(job.worker.setParameters({
+        tessedit_pageseg_mode: metadata ? (Tesseract.PSM.SINGLE_BLOCK ?? 6) : Tesseract.PSM.SPARSE_TEXT,
+        tessedit_char_whitelist: '', preserve_interword_spaces: '1', user_defined_dpi: '150',
+      }));
+      job.recognitionRange = [0.48, 0.76];
+      let result = await wait(job.worker.recognize(image, {}, { text: true }));
+      let matched = metadata
+        ? validateMetadataResult(result.data?.text, matchingProduct.sku, metadata.cards.length, parseScreenshotText)
+        : validateKnownSkuText(result.data?.text, matchingProduct.sku, parseScreenshotText);
+      if (!matched && metadata) {
+        // A second pass retains native glyph size for low-resolution images.
+        // It uses this same small coding model and never loads Chinese data.
+        report('正在用原始文字尺寸核对库位和编码', 0.76);
+        const native = await wait(prepareMetadataSheet(file, { signal, normalizeHeight: 0 }));
+        image = native?.blob || await prepareImage(file, signal, wait, 'location', true);
+        await wait(job.worker.setParameters({tessedit_pageseg_mode: native ? (Tesseract.PSM.SINGLE_BLOCK ?? 6) : Tesseract.PSM.SPARSE_TEXT}));
+        job.recognitionRange = [0.76, 0.98];
+        result = await wait(job.worker.recognize(image, {}, { text: true }));
+        matched = native
+          ? validateMetadataResult(result.data?.text, matchingProduct.sku, native.cards.length, parseScreenshotText)
+          : validateKnownSkuText(result.data?.text, matchingProduct.sku, parseScreenshotText);
+      }
+      if (job.stopped || signal?.aborted) throw abortError();
+      if (!matched) {
+        // Unreadable identity is an input failure, not an engine failure.
+        // Keep the initialized worker for a replacement screenshot or SKU.
+        job.keepWorker = true;
+        throw new Error('无法唯一对应这段文字的 SKU 和库位。请使用包含商品库位及 SKU 的清晰截图；不会选取其他商品。');
+      }
+      job.completed = true;
+      report('库位与 SKU 匹配完成，请核对', 1);
+      return { text: matched.ocrText, mode: 'full', scope: 'cards', language: 'location' };
+    }
+    let image = await prepareImage(file, signal, wait, job.mode);
     job.stage = '加载组件';
     report('正在加载本地识别组件，首次使用需要稍等', 0.08);
     await wait(ensureAssetCache());
@@ -442,37 +509,11 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
       preserve_interword_spaces: '1',
       user_defined_dpi: '150',
     }));
-    job.recognitionRange = compact ? [0.48, 0.70] : [0.48, 0.90];
+    job.recognitionRange = [0.48, 0.90];
     let result = await wait(job.worker.recognize(image, {}, { text: true }));
     if (job.stopped || signal?.aborted) throw abortError();
     if (job.mode === 'location') {
-      if (targetedFastPass) {
-        const text = String(result.data?.text || '').replace(/\r\n?/g, '\n').trim();
-        const matched = parseScreenshotText(text, { product: matchingProduct });
-        // The parser requires a unique, sufficiently long visible SKU match;
-        // partial/missing card boundaries and contradictory data fall back.
-        if (!matched.matchError && matched.matchedBy === 'sku' && matched.loc) {
-          job.completed = true;
-          report('库位与 SKU 匹配完成，请核对', 1);
-          return { text, mode: 'full', scope: compact ? 'cards' : 'image', language: job.entry.language };
-        }
-        if (compact) {
-          // The smaller pass may omit wrapped or unfamiliar card layouts.
-          // Retry the complete original before loading the bilingual model.
-          report('正在核对原图中的商品和库位', 0.70);
-          image = await prepareImage(file, signal, wait, 'location', true);
-          job.recognitionRange = [0.70, 0.86];
-          result = await wait(job.worker.recognize(image, {}, { text: true }));
-          const originalText = String(result.data?.text || '').replace(/\r\n?/g, '\n').trim();
-          const originalMatch = parseScreenshotText(originalText, { product: matchingProduct });
-          if (!originalMatch.matchError && originalMatch.matchedBy === 'sku' && originalMatch.loc) {
-            job.completed = true;
-            report('库位与 SKU 匹配完成，请核对', 1);
-            return { text: originalText, mode: 'full', scope: 'image', language: job.entry.language };
-          }
-        }
-      }
-      const location = targetedFastPass ? '' : fastLocation(result.data?.text);
+      const location = fastLocation(result.data?.text);
       if (location) {
         job.completed = true;
         report('库位识别完成，请核对', 1);
@@ -514,7 +555,7 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
     clearTimeout(timeout);
     signal?.removeEventListener('abort', cancel);
     job.stopped = true;
-    if (!job.completed) await disposeResident(job.entry || resident);
+    if (!job.completed && !job.keepWorker && job.entry && (!job.cancelled || job.entry.recognizing)) await disposeResident(job.entry);
     else if (resident) idleRelease(resident);
     if (activeJob === job) activeJob = null;
   }
