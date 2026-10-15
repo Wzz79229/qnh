@@ -6,6 +6,8 @@
  * or a label was printed. The receiving browser/app controls the final action.
  */
 const objectUrls = new Set();
+let preparedImages = new WeakMap();
+let imageDataUrls = new WeakMap();
 let sharing = false;
 
 function filenameFor(value) {
@@ -25,8 +27,11 @@ function checkPng(blob) {
 }
 
 function imageUrl(blob) {
+  const existing = preparedImages.get(blob);
+  if (existing) return existing;
   const url = URL.createObjectURL(blob);
   objectUrls.add(url);
+  preparedImages.set(blob, url);
   return url;
 }
 
@@ -39,14 +44,58 @@ export function capabilities() {
   const dom = typeof document !== 'undefined' && typeof window !== 'undefined';
   const urls = typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function';
   const secureContext = typeof window !== 'undefined' && window.isSecureContext === true;
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+  // iPad Safari can identify itself as a Mac. Download support alone cannot
+  // tell us whether a browser can save an image to the phone's photo library.
+  const ios = /iPad|iPhone|iPod/i.test(ua)
+    || (typeof navigator !== 'undefined' && navigator.platform === 'MacIntel'
+      && navigator.maxTouchPoints > 1);
+  const inApp = /MicroMessenger|\bQQ\/|MQQBrowser|AlipayClient|DingTalk|FBAN|FBAV|Instagram|; wv\)/i.test(ua);
+  const download = dom && urls && 'download' in document.createElement('a');
   return {
-    download: dom && urls && 'download' in document.createElement('a'),
+    download,
     fileShare: secureContext && typeof File === 'function'
       && typeof navigator !== 'undefined' && typeof navigator.canShare === 'function'
       && typeof navigator.share === 'function',
     openImage: dom && urls && typeof window.open === 'function',
     secureContext,
+    // A UI hint, not a promise of browser or system save behavior. Always keep
+    // the real PNG <img> available as a long-press/save fallback in the page.
+    saveMode: ios || inApp || !download ? 'image' : 'download',
+    ios,
+    inApp,
   };
+}
+
+/**
+ * Prepare the image before enabling save buttons. Use imageUrl for a real <img>
+ * in the page and downloadUrl for <a download>. The data URL lets image menus in
+ * mobile embedded browsers see the PNG without resolving a temporary Blob URL.
+ * FileReader preserves the final PNG bytes, including its physical-size metadata.
+ * No image conversion, upload or popup occurs. Repeated calls reuse both URLs.
+ */
+export async function prepareLabelImage(blob, filename) {
+  checkPng(blob);
+  if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+    throw new Error('当前浏览器无法准备图片，请使用系统浏览器重新打开页面。');
+  }
+  const url = imageUrl(blob);
+  let dataUrl = imageDataUrls.get(blob);
+  if (!dataUrl) {
+    dataUrl = new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('图片保存准备失败，请重新生成标签。'));
+      reader.onabort = () => reject(new Error('图片保存准备已中断，请重新生成标签。'));
+      reader.readAsDataURL(blob.type ? blob : new Blob([blob], { type: 'image/png' }));
+    });
+    imageDataUrls.set(blob, dataUrl);
+  }
+  let original;
+  try { original = await dataUrl; }
+  catch (error) { imageDataUrls.delete(blob); throw error; }
+  return { url, downloadUrl: url, imageUrl: original,
+    filename: filenameFor(filename), type: 'image/png' };
 }
 
 /**
@@ -67,8 +116,6 @@ export function saveLabelImage(blob, filename, options = {}) {
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = safeName;
-    anchor.target = '_blank';
-    anchor.rel = 'noopener noreferrer';
     anchor.title = options.title || '保存标签图片';
     anchor.setAttribute('aria-label', anchor.title);
     anchor.style.display = 'none';
@@ -76,7 +123,9 @@ export function saveLabelImage(blob, filename, options = {}) {
     try {
       anchor.click();
     } finally {
-      anchor.remove();
+      // Some mobile browsers process the activated link after the current
+      // stack. Keep the link attached briefly and keep its Blob URL alive.
+      setTimeout(() => anchor.remove(), 1000);
     }
     return { status: 'download-requested', filename: safeName, url,
       message: '已请求保存 PNG，请查看浏览器下载或保存菜单。' };
@@ -160,4 +209,6 @@ export function openLabelImage(blob) {
 export function cleanup() {
   for (const url of objectUrls) URL.revokeObjectURL(url);
   objectUrls.clear();
+  preparedImages = new WeakMap();
+  imageDataUrls = new WeakMap();
 }
