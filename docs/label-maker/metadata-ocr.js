@@ -29,7 +29,7 @@ function lines(image, rect, threshold=THRESHOLD) {
 function hasLongAsciiRun(image,rect,threshold=THRESHOLD) {
   const b=binary(image,rect,threshold),columns=new Uint16Array(b.width);
   for(let y=0;y<b.height;y++)for(let x=0;x<b.width;x++)columns[x]+=b.values[y*b.width+x];
-  let count=0,previous;
+  let count=0,longest=0,totalTall=0,previous;
   for(const column of groups(columns,1,0)) {
     let y0=b.height,y1=-1;
     for(let y=0;y<b.height;y++)for(let x=column.start;x<=column.end;x++)if(b.values[y*b.width+x]) {y0=Math.min(y0,y);y1=Math.max(y1,y);}
@@ -37,12 +37,47 @@ function hasLongAsciiRun(image,rect,threshold=THRESHOLD) {
     const tall=height>=b.height*.68 && width/height>=.12 && width/height<=.85;
     const joined=!previous||column.start-previous.end<=b.height*.55;
     count=tall?(joined?count+1:1):0;
+    if(tall)totalTall++;
+    longest=Math.max(longest,count);
     // The parser permits 3+7, 4+6, and 5+5 visible partial-SKU halves. Every
     // accepted length has at least one half of five digits, never six.
-    if(count>=5)return true;
     previous=column;
   }
-  return false;
+  // Five-digit inventory totals also contain a long digit run. They are not
+  // identifier rows: a permitted visible SKU has at least ten numeric glyphs.
+  return longest>=5&&totalTall>=10;
+}
+function removeEdgeRules(image) {
+  // A scrollbar can join every text row when the crop reaches the right edge.
+  // Remove only long uninterrupted dark strokes there, never ordinary glyphs.
+  const w=image.width,h=image.height,minRun=Math.round(w*.12);
+  for(let x=Math.round(w*.94);x<w;x++) {
+    let start=-1;
+    for(let y=0;y<=h;y++) {
+      const i=(y*w+x)*4,dark=y<h&&(image.data[i]+image.data[i+1]+image.data[i+2])/3<210;
+      if(dark&&start<0)start=y;
+      if(!dark&&start>=0) {
+        if(y-start>=minRun)for(let row=start;row<y;row++){const p=(row*w+x)*4;image.data[p]=image.data[p+1]=image.data[p+2]=255;}
+        start=-1;
+      }
+    }
+  }
+}
+function trimIdentifierWidth(image,rect) {
+  const b=binary(image,rect,210),columns=new Uint16Array(b.width);
+  for(let y=0;y<b.height;y++)for(let x=0;x<b.width;x++)columns[x]+=b.values[y*b.width+x];
+  let tall=0,previous=null;
+  for(const column of groups(columns,1,0)) {
+    // Keep every identifier glyph. A large whitespace gap after sufficient
+    // numeric-sized glyphs separates auxiliary controls such as Copy buttons.
+    if(previous&&tall>=10&&column.start-previous.end>b.height*1.5)return {...rect,width:Math.min(rect.width,previous.end+1+Math.ceil(b.height*.10))};
+    let top=b.height,bottom=-1;
+    for(let y=0;y<b.height;y++)for(let x=column.start;x<=column.end;x++)if(b.values[y*b.width+x]){top=Math.min(top,y);bottom=Math.max(bottom,y);}
+    const height=bottom-top+1,width=column.end-column.start+1;
+    if(height>=b.height*.68&&width/height>=.12&&width/height<=.85)tall++;
+    previous=column;
+  }
+  return rect;
 }
 function blueBadges(image) {
   const w=image.width,h=image.height,x0=Math.round(w*.02),x1=Math.round(w*.40),width=x1-x0;
@@ -86,14 +121,15 @@ export async function prepareMetadataSheet(blob,{signal,normalizeHeight=40}={}) 
     if(w<400||w>1700||h<w*1.25||h>w*5||w*h>8000000)return null;
     const source=document.createElement('canvas');source.width=w;source.height=h;
     const ctx=source.getContext('2d',{willReadFrequently:true});ctx.drawImage(bitmap,0,0);
-    const image=ctx.getImageData(0,0,w,h),badges=blueBadges(image);
+    const image=ctx.getImageData(0,0,w,h);removeEdgeRules(image);ctx.putImageData(image,0,0);
+    const badges=blueBadges(image);
     if(!badges.length||badges.length>12||badges.some((r,i)=>i&&r.start-badges[i-1].start<w*.38))return null;
     // Global omission detection is more sensitive than output binarization.
     // A faint SKU outside a badge must invalidate the crop, not disappear.
     const badgeX=badges.reduce((sum,b)=>sum+b.x,0)/badges.length;
-    const shift=badgeX-w*.055,metadataX=Math.round(w*.218+shift),metadataWidth=Math.round(w*.84)-metadataX;
+    const shift=badgeX-w*.055,metadataX=Math.round(w*.218+shift),metadataWidth=w-metadataX;
     const allIdentifiers=lines(image,{x:metadataX,y:0,width:metadataWidth,height:h},210)
-      .filter(r=>hasLongAsciiRun(image,r,210));
+      .filter(r=>hasLongAsciiRun(image,r,210)).map(r=>trimIdentifierWidth(image,r));
     const cards=[];
     for(const badge of badges) {
       const locationX=Math.round(w*.125+shift);
@@ -142,7 +178,15 @@ export async function prepareMetadataSheet(blob,{signal,normalizeHeight=40}={}) 
 function normalizeCodeText(text) {
   return String(text).replace(/[‐‑‒–—−﹣－]/g,'-')
     .replace(/\bS[ \t]*K[ \t]*U\b/gi,'SKU')
-    .replace(/\bSKU\s*[:：]?\s*\n\s*(?=\d)/gi,'SKU: ');
+    .replace(/\bSKU\s*[:：]?\s*\n\s*(?=\d)/gi,'SKU: ')
+    // Android's centered ellipsis can be read as ::-, -:- or :::. Normalize
+    // only that punctuation between two numeric halves of a labelled SKU.
+    // Every digit remains exact; short evidence and duplicate matches reject.
+    .replace(/(\bSKU\s*[:：]?\s*)(\d[\d \t]*)([.。:：·•\- \t]{2,})(\d[\d \t]*)/gi,(original,heading,prefix,separator,suffix)=>{
+      const mark=separator.replace(/[ \t]/g,'');
+      return mark.length>=2&&(/[:：]/.test(mark)||[...mark].filter(c=>'.。·•'.includes(c)).length>=2)
+        ?heading+prefix.trim()+'...'+suffix.trim():original;
+    });
 }
 function skuEvidence(skuLines,sku) {
   const skuPattern=/\bSKU\s*[:：]?\s*(\d[\d \t]*(?:(?:\.{2,}|…|⋯)\s*\d[\d \t]*)?)/i;

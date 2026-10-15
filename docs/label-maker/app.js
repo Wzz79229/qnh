@@ -13,7 +13,7 @@ let saveFocus=null;
 let recognitionRuntime=null,autoTimer=null,autoQueued=false,autoSubmitting=false;
 let preloadTask=null;
 function loadRecognitionRuntime(){
-  if(!recognitionRuntime)recognitionRuntime=import('./ocr.js?v=20261015-8').catch(error=>{recognitionRuntime=null;throw error;});
+  if(!recognitionRuntime)recognitionRuntime=import('./ocr.js?v=20261015-9').catch(error=>{recognitionRuntime=null;throw error;});
   return recognitionRuntime;
 }
 function warmRecognition(){

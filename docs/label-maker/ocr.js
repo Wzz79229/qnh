@@ -3,8 +3,8 @@ import { parseScreenshotText } from './label.js?v=20261015-8';
 import { ensureAssetCache } from './asset-cache.js?v=20261015-7';
 import { prepareOcrAssets } from './asset-loader.js?v=20261015-7';
 import { recognizeLocationFast } from './lightweight-location-ocr.js?v=20261015-5';
-import { prepareMetadataSheet, validateMetadataCardsResult, validateSpatialSkuResult, validateKnownSkuText } from './metadata-ocr.js?v=20261015-7';
-export { validateKnownSkuText } from './metadata-ocr.js?v=20261015-7';
+import { prepareMetadataSheet, validateMetadataCardsResult, validateSpatialSkuResult, validateKnownSkuText } from './metadata-ocr.js?v=20261015-9';
+export { validateKnownSkuText } from './metadata-ocr.js?v=20261015-9';
 
 const ASSET_ROOT = new URL('./vendor/tesseract/', import.meta.url);
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
