@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#143d3b">
+  <meta name="description" content="把整段商品文字和库存截图放在同一个输入区，识别并生成80×60毫米库位标签PNG，再使用标签打印App打印。">
+  <title>库位标签 · 图片生成器</title>
+  <link rel="icon" href="./icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./composer.css">
+</head>
+<body>
+  <a class="skip" href="#editor">跳到商品信息</a>
+  <header class="site-header">
+    <a class="brand" href="./" aria-label="库位标签首页"><span class="brand-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span><span>库位标签<small>LABEL MAKER</small></span></a>
+    <a class="help-link" href="#how-to">怎么打印 <span aria-hidden="true">↗</span></a>
+  </header>
+  <main>
+    <section class="intro" aria-labelledby="page-title">
+      <div><p class="eyebrow"><span></span>把商品信息，变成一张清楚的标签</p><h1 id="page-title">文字和截图，<br class="mobile-break">一起变成标签。</h1><p class="intro-copy">粘贴整段文字，添加库存截图。识别、排好、保存，一处完成。</p></div>
+      <div class="size-card" aria-label="固定标签尺寸80乘60毫米"><span>标签尺寸</span><strong>80 <em>×</em> 60<small>mm</small></strong><p>横向标签 · 高清 PNG</p></div>
+    </section>
+    <div class="workspace">
+      <section class="editor card" id="editor" aria-labelledby="editor-title">
+        <div class="section-head"><div><span class="step">01</span><h2 id="editor-title">放入商品信息</h2></div><button id="example" class="text-button" type="button">试用示例 <span aria-hidden="true">↗</span></button></div>
+        <form id="product-form" novalidate>
+          <label class="composer-label" for="product-text">整段文字和截图放在这里</label>
+          <div class="composer" id="composer">
+            <textarea id="product-text" rows="8" maxlength="8000" aria-describedby="composer-hint" placeholder="粘贴商品信息，例如：&#10;商品名称：示例商品 饮用纯净水；&#10;规格：500ml/瓶；&#10;SKU：0001234567890123456&#10;&#10;库位在截图里？一起添加截图即可。"></textarea>
+            <div class="attachment" id="attachment" hidden><img id="image-thumb" alt="待识别的库存截图"><div><strong id="image-name"></strong><span>将与文字一起识别</span></div><button id="remove-image" type="button" aria-label="移除截图">×</button></div>
+            <div class="composer-tools"><button id="add-image" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 6-6 4 4 3-3 5 5"/></svg>添加截图</button><span>也可粘贴或拖入图片</span><button id="clear-input" type="button">清空</button></div>
+            <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+          </div>
+          <p class="field-hint" id="composer-hint">文字可以补充完整 SKU，截图可以提供库位。支持同时识别，也可只放其中一种。</p>
+          <div id="recognition-progress" class="recognition-progress" hidden><div><span id="progress-text" role="status" aria-live="polite">正在识别…</span><button id="cancel-recognition" type="button">取消</button></div><progress id="progress-bar" max="1" value="0" aria-label="图片识别进度"></progress><small>首次图片识别需加载资源，请稍等。</small></div>
+          <p id="form-error" class="form-error" role="alert" hidden></p>
+          <button class="primary-button" id="generate" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM8 10v4m3-4v4m2-4v4m3-4v4"/></svg><span>识别并生成标签</span><span aria-hidden="true">→</span></button>
+          <p class="local-note"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 13 4v4c0 3-5 6.5-5 6.5S3 11 3 8V4zM5.5 7.5 7 9l3.5-3.5"/></svg>内容仅在当前浏览器内处理</p>
+        </form>
+        <section id="recognized-info" class="recognized-info" aria-labelledby="recognized-title" hidden><div class="recognized-head"><h3 id="recognized-title">识别结果</h3><span>保存前请核对</span></div><dl id="record-summary"></dl><p id="recognition-note"></p><details id="ocr-details" hidden><summary>查看图片识别文字</summary><pre id="ocr-text"></pre></details></section>
+      </section>
+      <section class="preview-column" aria-labelledby="preview-title">
+        <div class="preview-card card">
+          <div class="section-head"><div><span class="step">02</span><h2 id="preview-title">标签预览</h2></div><span id="preview-state" class="status-chip">等待生成</span></div>
+          <div class="preview-board" id="preview-board">
+            <span class="dimension dimension-top" aria-hidden="true">80 mm</span><span class="dimension dimension-side" aria-hidden="true">60 mm</span>
+            <div class="label-paper" id="label-paper">
+              <div id="empty-preview" class="empty-preview"><svg viewBox="0 0 64 48" aria-hidden="true"><rect x="1" y="1" width="62" height="46" rx="3"/><path d="M11 12h42M19 18h26M11 25v8m4-8v8m5-8v8m3-8v8m4-8v8m5-8v8m5-8v8m3-8v8m5-8v8m5-8v8M19 40h26"/></svg><strong>你的标签会显示在这里</strong><span>放入文字和截图，再点“识别并生成标签”</span></div>
+              <div id="dirty-overlay" class="dirty-overlay" hidden>内容已修改，请重新生成</div>
+            </div>
+          </div>
+          <div class="preview-facts"><span><i></i>名称 · 规格 · SKU · 库位</span><span>300 dpi</span></div>
+          <p id="render-warning" class="render-warning" hidden></p>
+          <div class="save-area"><button id="download" type="button" class="primary-button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg><span>下载 PNG 图片</span></button><div class="save-alternatives"><button id="open-image" type="button" disabled>打开原图</button><span aria-hidden="true">·</span><button id="share-image" type="button" disabled>分享图片</button></div><p id="save-status" class="save-status" role="status" aria-live="polite">生成后即可保存，用标签打印 App 打印。</p><a id="image-fallback" class="fallback-link" target="_blank" rel="noopener" hidden>点这里打开原图</a></div>
+        </div>
+        <aside class="how-to card" id="how-to" aria-labelledby="how-to-title"><div class="section-head"><div><span class="step">03</span><h2 id="how-to-title">保存后，去打印</h2></div></div><ol><li><span>1</span><div><strong>把标签保存到手机</strong><p>苹果手机可点“打开原图”，长按图片保存；也可用“分享图片”打开系统分享菜单。</p></div></li><li><span>2</span><div><strong>打开得力标签 App</strong><p>新建 80×60 毫米标签，添加刚保存的图片，并保持比例铺满标签。</p></div></li><li><span>3</span><div><strong>连接打印机，先试打一张</strong><p>确认方向、纸张尺寸和条码扫描效果，再继续打印。</p></div></li></ol></aside>
+      </section>
+    </div>
+    <footer><span>库位标签 · 图片生成器</span><span>无需登录 · 无需上传商品数据</span></footer>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
