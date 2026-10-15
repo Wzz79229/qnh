@@ -1,4 +1,4 @@
-import {renderLabel,encodePng,parseProductText,parseScreenshotText,mergeProductSources} from './label.js?v=20261015-7';
+import {renderLabel,encodePng,parseProductText,parseScreenshotText,mergeProductSources} from './label.js?v=20261015-8';
 import {prepareLabelImage,saveLabelImage,shareLabelImage,capabilities,cleanup} from './save-image.js?v=20261015-2';
 import {ensureAssetCache} from './asset-cache.js?v=20261015-7';
 
@@ -13,7 +13,7 @@ let saveFocus=null;
 let recognitionRuntime=null,autoTimer=null,autoQueued=false,autoSubmitting=false;
 let preloadTask=null;
 function loadRecognitionRuntime(){
-  if(!recognitionRuntime)recognitionRuntime=import('./ocr.js?v=20261015-7').catch(error=>{recognitionRuntime=null;throw error;});
+  if(!recognitionRuntime)recognitionRuntime=import('./ocr.js?v=20261015-8').catch(error=>{recognitionRuntime=null;throw error;});
   return recognitionRuntime;
 }
 function warmRecognition(){

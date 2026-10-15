@@ -156,7 +156,8 @@ export function renderLabel(record) {
   const nameHeight = nameLines.length * nameLineHeight;
   const specFont = 15 * POINT;
   const specLineHeight = specFont + 2 * PX_PER_MM;
-  const specLines = fields.spec ? ('规格：' + fields.spec).split(/\r?\n/) : [];
+  // Empty specifications keep their printed heading and reserved row.
+  const specLines = ('规格：' + fields.spec).split(/\r?\n/);
   const specHeight = specLines.length * specLineHeight;
   const barcodeWidth = 52 * PX_PER_MM;
   const barcodeHeight = 8 * PX_PER_MM;

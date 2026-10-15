@@ -1,5 +1,5 @@
 /** Browser-only OCR. Images stay in memory; only bundled OCR assets are loaded. */
-import { parseScreenshotText } from './label.js?v=20261015-7';
+import { parseScreenshotText } from './label.js?v=20261015-8';
 import { ensureAssetCache } from './asset-cache.js?v=20261015-7';
 import { prepareOcrAssets } from './asset-loader.js?v=20261015-7';
 import { recognizeLocationFast } from './lightweight-location-ocr.js?v=20261015-5';
