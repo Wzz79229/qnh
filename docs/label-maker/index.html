@@ -28,11 +28,11 @@
           <label class="composer-label" for="product-text">整段文字和截图放在这里</label>
           <div class="composer" id="composer">
             <textarea id="product-text" rows="8" maxlength="8000" aria-describedby="composer-hint" placeholder="粘贴商品信息，例如：&#10;商品名称：示例商品 饮用纯净水；&#10;规格：500ml/瓶；&#10;SKU：0001234567890123456&#10;&#10;库位在截图里？一起添加截图即可。"></textarea>
-            <div class="attachment" id="attachment" hidden><img id="image-thumb" alt="待识别的库存截图"><div><strong id="image-name"></strong><span>将与文字一起识别</span></div><button id="remove-image" type="button" aria-label="移除截图">×</button></div>
+            <div class="attachment" id="attachment" hidden><img id="image-thumb" alt="待识别的库存截图"><div><strong id="image-name"></strong><span id="image-readiness" role="status" aria-live="polite">文字信息齐全后自动识别</span></div><button id="remove-image" type="button" aria-label="移除截图">×</button></div>
             <div class="composer-tools"><button id="add-image" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 6-6 4 4 3-3 5 5"/></svg>添加截图</button><span>也可粘贴或拖入图片</span><button id="clear-input" type="button">清空</button></div>
             <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
           </div>
-          <p class="field-hint" id="composer-hint">文字提供完整 SKU，截图提供对应商品的库位。一张图有多个商品时，会按 SKU 和商品名称匹配。</p>
+          <p class="field-hint" id="composer-hint">文字和截图齐全后自动识别，也可点击下方按钮。一张图有多个商品时，会按完整 SKU 和商品名称匹配。</p>
           <div id="recognition-progress" class="recognition-progress" hidden><div><span id="progress-text" role="status" aria-live="polite">正在识别…</span><button id="cancel-recognition" type="button">取消</button></div><progress id="progress-bar" max="1" value="0" aria-label="图片识别进度"></progress><small>首次需加载识别资源。文字信息越完整，图片识别越快。</small></div>
           <p id="form-error" class="form-error" role="alert" hidden></p>
           <button class="primary-button" id="generate" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM8 10v4m3-4v4m2-4v4m3-4v4"/></svg><span>识别并生成标签</span><span aria-hidden="true">→</span></button>
@@ -69,6 +69,6 @@
       <p class="save-sheet-help">苹果手机可在系统菜单中选“存储图像”或“存储到文件”。若 App 内无法保存，请用 Safari 或手机浏览器打开本页。</p>
     </div>
   </section>
-  <script type="module" src="./app.js?v=20261015-3"></script>
+  <script type="module" src="./app.js?v=20261015-4"></script>
 </body>
 </html>

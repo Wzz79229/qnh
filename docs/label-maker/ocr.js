@@ -124,30 +124,126 @@ async function prepareImage(file, signal, wait, mode, wholeImage = false) {
   return blob;
 }
 
+/**
+ * Conservative QNH card-header fast pass for a known numeric target SKU.
+ * Returns null for unfamiliar layouts. This is a card crop, never full-image
+ * evidence: the caller must match the visible SKU and fall back on ambiguity.
+ * Keep native text size; reducing width can turn a valid 9 into OCR noise.
+ */
+async function prepareCompactCards(file, signal, wait) {
+  const image = await wait(decodeImage(file, signal));
+  const width = image.naturalWidth;
+  const height = image.naturalHeight;
+  if (width < 400 || width > LOCATION_IMAGE_MAX_WIDTH || height > LOCATION_IMAGE_MAX_EDGE
+      || height < width * 1.25) return null;
+  const source = document.createElement('canvas');
+  source.width = width;
+  source.height = height;
+  const context = source.getContext('2d', { alpha: false, willReadFrequently: true });
+  if (!context) return null;
+  context.fillStyle = '#fff';
+  context.fillRect(0, 0, width, height);
+  context.drawImage(image, 0, 0);
+
+  // Only inspect the narrow badge column. Its pale-blue rectangular background
+  // remains recognizable even where dark blue Chinese letters cross a row.
+  const scanX = Math.round(width * 0.04);
+  const scanWidth = Math.round(width * 0.12) - scanX;
+  const pixels = context.getImageData(scanX, 0, scanWidth, height).data;
+  const groups = [];
+  for (let y = 0; y < height; y++) {
+    let blue = 0;
+    for (let x = 0; x < scanWidth; x++) {
+      const index = (y * scanWidth + x) * 4;
+      const red = pixels[index], green = pixels[index + 1], value = pixels[index + 2];
+      if (red > 170 && green > 200 && value > 215 && value - red > 12 && green - red > 5) blue++;
+    }
+    if (blue <= width * 0.02) continue;
+    const previous = groups[groups.length - 1];
+    if (!previous || y > previous.end + 8) groups.push({ start: y, end: y });
+    else previous.end = y;
+  }
+  const badges = groups.filter(group => group.end - group.start > width * 0.015
+    && group.end - group.start < width * 0.08);
+  // A regular portrait stock-list layout has one badge per separated card.
+  // Tightly packed/overlapping detections are not reliable enough to crop.
+  if (!badges.length || badges.length > 12 || badges.some((badge, index) => index
+      && badge.start - badges[index - 1].start < width * 0.38)) {
+    source.width = source.height = 1;
+    return null;
+  }
+  const regions = badges.map(badge => {
+    const y = Math.max(0, badge.start - Math.round(width * 0.01));
+    return { y, height: Math.min(Math.round(width * 0.33), height - y) };
+  });
+  // A cut-off footer with too little space for its SKU is sent to the original
+  // image path rather than used as incomplete card evidence.
+  if (regions.some(region => region.height < width * 0.26)) {
+    source.width = source.height = 1;
+    return null;
+  }
+  const compactHeight = regions.reduce((sum, region) => sum + region.height + 32, 0);
+  if (compactHeight >= height * 0.78) {
+    source.width = source.height = 1;
+    return null;
+  }
+  const compact = document.createElement('canvas');
+  compact.width = width;
+  compact.height = compactHeight;
+  const output = compact.getContext('2d', { alpha: false, willReadFrequently: true });
+  if (!output) { source.width = source.height = 1; return null; }
+  output.fillStyle = '#fff';
+  output.fillRect(0, 0, compact.width, compact.height);
+  let top = 16;
+  for (const region of regions) {
+    output.drawImage(source, 0, region.y, width, region.height, 0, top, width, region.height);
+    // The badge and product photo create English OCR noise. Their rectangles
+    // stop before the location and before the SKU/name/metadata text column.
+    output.fillRect(0, top, Math.round(width * 0.12), Math.round(width * 0.055));
+    output.fillRect(0, top + Math.round(width * 0.045), Math.round(width * 0.205),
+      region.height - Math.round(width * 0.045));
+    top += region.height + 32;
+  }
+  source.width = source.height = 1;
+  const monochrome = output.getImageData(0, 0, compact.width, compact.height);
+  for (let index = 0; index < monochrome.data.length; index += 4) {
+    const shade = (monochrome.data[index] + monochrome.data[index + 1] + monochrome.data[index + 2]) / 3 < 185 ? 0 : 255;
+    monochrome.data[index] = monochrome.data[index + 1] = monochrome.data[index + 2] = shade;
+  }
+  output.putImageData(monochrome, 0, 0);
+  const blob = await wait(new Promise(resolve => compact.toBlob(resolve, 'image/png')));
+  compact.width = compact.height = 1;
+  return blob;
+}
+
 function disposeResident(entry = resident) {
   if (!entry) return Promise.resolve();
+  entry.disposed = true;
   if (resident === entry) {
     clearTimeout(idleTimer);
     resident = null;
   }
-  return entry.worker ? entry.worker.terminate().catch(() => {}) : Promise.resolve();
+  if (entry.worker && !entry.termination) entry.termination = entry.worker.terminate().catch(() => {});
+  return entry.termination || Promise.resolve();
 }
 
-async function acquireWorker(Tesseract, language, job, wait, report) {
+function compatibleWorker(entry, language) {
+  return entry && !entry.disposed && (entry.language === language || entry.language === 'full');
+}
+
+function idleRelease(entry) {
   clearTimeout(idleTimer);
-  // A bilingual worker also reads locations, so do not reload it just to use
-  // the faster crop. Only upgrade an English worker if full OCR is needed.
-  if (resident?.worker && (resident.language === language || resident.language === 'full')) {
-    job.entry = resident;
-    job.worker = resident.worker;
-    report('识别组件已就绪，正在读取截图', 0.47);
-    return job.worker;
-  }
-  await wait(disposeResident());
-  const entry = { worker: null, language };
+  idleTimer = setTimeout(() => {
+    if (!activeJob && resident === entry) void disposeResident(entry);
+  }, WORKER_IDLE_MS);
+}
+
+function createResident(language, runtime) {
+  const entry = { worker: null, promise: null, language, disposed: false, termination: null };
   resident = entry;
-  job.entry = entry;
-  const workerPromise = Tesseract.createWorker(language === 'location' ? ['eng'] : ['chi_sim', 'eng'], 1, {
+  // Publish the promise before loading the runtime. Foreground OCR can attach
+  // to an initializer already started while the image picker was open.
+  entry.promise = (runtime ? Promise.resolve(runtime) : loadRuntime()).then(Tesseract => Tesseract.createWorker(language === 'location' ? ['eng'] : ['chi_sim', 'eng'], 1, {
     workerPath: new URL('worker.min.js', ASSET_ROOT).href,
     corePath: new URL('core/', ASSET_ROOT).href.replace(/\/$/, ''),
     langPath: new URL('lang/', ASSET_ROOT).href.replace(/\/$/, ''),
@@ -163,7 +259,8 @@ async function acquireWorker(Tesseract, language, job, wait, report) {
       if (!current || current.entry !== entry || current.stopped) return;
       const part = Math.min(1, Math.max(0, message.progress || 0));
       if (message.status === 'recognizing text') {
-        current.report(current.mode === 'location' ? '正在快速识别库位' : '正在识别截图中的中文和编码', 0.48 + part * 0.5);
+        const range = current.recognitionRange || [0.48, 0.98];
+        current.report(current.mode === 'location' ? '正在快速识别库位' : '正在识别截图中的中文和编码', range[0] + part * (range[1] - range[0]));
       } else if (message.status === 'loading language traineddata') {
         current.report(language === 'location' ? '正在加载库位识别数据，首次使用需要稍等' : '正在加载中文和英文识别数据，首次使用需要稍等', 0.24 + part * 0.18);
       } else if (message.status === 'initializing api') {
@@ -176,15 +273,66 @@ async function acquireWorker(Tesseract, language, job, wait, report) {
       if (activeJob?.entry === entry) activeJob.stop(new Error('本地识别组件运行失败，请刷新页面或更换清晰截图重试。'));
       else void disposeResident(entry);
     },
+  })).then(worker => {
+    entry.worker = worker;
+    if (entry.disposed || resident !== entry) {
+      void disposeResident(entry);
+      throw abortError();
+    }
+    return worker;
+  }).catch(error => {
+    if (resident === entry) resident = null;
+    throw error;
   });
   // Initialization itself cannot be interrupted by Tesseract. A cancelled
   // initializer is discarded when it resolves and never replaces a new job.
-  workerPromise.then(worker => {
-    entry.worker = worker;
-    if (job.stopped || resident !== entry) void worker.terminate().catch(() => {});
-  }).catch(() => { if (resident === entry) resident = null; });
-  job.worker = await wait(workerPromise);
+  entry.promise.catch(() => {});
+  return entry;
+}
+
+async function acquireWorker(Tesseract, language, job, wait, report) {
+  clearTimeout(idleTimer);
+  // A bilingual worker also reads locations, so do not reload it just to use
+  // the faster crop. Reuse pending initialization as well as ready workers.
+  let entry = resident;
+  if (!compatibleWorker(entry, language)) {
+    await wait(disposeResident(entry));
+    entry = createResident(language, Tesseract);
+  }
+  job.entry = entry;
+  if (entry.worker) report('识别组件已就绪，正在读取截图', 0.47);
+  job.worker = await wait(entry.promise);
   return job.worker;
+}
+
+/** Start public OCR asset loading after an image action, without reading a file.
+ * Returns false on failure; foreground recognition can retry normally.
+ */
+export function warmupRecognition({ mode = 'location' } = {}) {
+  if (typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') return Promise.resolve(false);
+  const language = mode === 'full' ? 'full' : 'location';
+  let entry = resident;
+  if (activeJob && !compatibleWorker(entry, language)) return Promise.resolve(false);
+  clearTimeout(idleTimer);
+  if (!compatibleWorker(entry, language)) {
+    void disposeResident(entry);
+    entry = createResident(language);
+  }
+  // Bound idle initializers too. A very slow initializer may finish after
+  // release, in which case its worker is immediately terminated above.
+  if (!activeJob) idleRelease(entry);
+  return entry.promise.then(() => {
+    if (resident !== entry || entry.disposed) return false;
+    if (!activeJob) idleRelease(entry);
+    return true;
+  }, () => false);
+}
+
+/** Release warm/idle memory; an active recognition is cancelled safely. */
+export function releaseRecognition() {
+  clearTimeout(idleTimer);
+  if (activeJob) activeJob.stop(abortError());
+  return disposeResident();
 }
 
 function locationCandidates(text) {
@@ -214,10 +362,12 @@ function fastLocation(text) {
  * @param {{onProgress?: (value: {status: string, progress: number}) => void,
  * signal?: AbortSignal, mode?: 'full'|'location',
  * product?: {sku?: string, name?: string, spec?: string}, targetSku?: string}} [options]
- * @returns {Promise<{text: string, mode: 'full'|'location', scope?: 'image'}>}
+ * @returns {Promise<{text: string, mode: 'full'|'location', scope?: 'image'|'cards', language?: 'full'|'location'}>}
  * Full OCR text or a normalized, repeated location field; identifiers are never
  * substituted. `scope: 'image'` means all visible cards were read, so the text
  * may be reused when matching a different product in the same screenshot.
+ * `scope: 'cards'` contains detected card headers, not the complete image;
+ * reuse it only after matching the new product's identity again.
  */
 export async function recognizeScreenshot(file, { onProgress, signal, mode = 'full', product, targetSku } = {}) {
   if (signal?.aborted) throw abortError();
@@ -261,7 +411,8 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
   const timeout = setTimeout(() => stop(new Error('本地识别耗时过长，请裁剪截图后重试。')), 180_000);
   try {
     report('正在准备截图', 0.02);
-    let image = await prepareImage(file, signal, wait, job.mode, targetedFastPass);
+    const compact = targetedFastPass ? await prepareCompactCards(file, signal, wait) : null;
+    let image = compact || await prepareImage(file, signal, wait, job.mode, targetedFastPass);
     job.stage = '加载组件';
     report('正在加载本地识别组件，首次使用需要稍等', 0.08);
     const Tesseract = await wait(loadRuntime());
@@ -272,6 +423,7 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
       preserve_interword_spaces: '1',
       user_defined_dpi: '150',
     }));
+    job.recognitionRange = compact ? [0.48, 0.70] : [0.48, 0.90];
     let result = await wait(job.worker.recognize(image, {}, { text: true }));
     if (job.stopped || signal?.aborted) throw abortError();
     if (job.mode === 'location') {
@@ -283,7 +435,22 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
         if (!matched.matchError && matched.matchedBy === 'sku' && matched.loc) {
           job.completed = true;
           report('库位与 SKU 匹配完成，请核对', 1);
-          return { text, mode: 'full', scope: 'image' };
+          return { text, mode: 'full', scope: compact ? 'cards' : 'image', language: job.entry.language };
+        }
+        if (compact) {
+          // The smaller pass may omit wrapped or unfamiliar card layouts.
+          // Retry the complete original before loading the bilingual model.
+          report('正在核对原图中的商品和库位', 0.70);
+          image = await prepareImage(file, signal, wait, 'location', true);
+          job.recognitionRange = [0.70, 0.86];
+          result = await wait(job.worker.recognize(image, {}, { text: true }));
+          const originalText = String(result.data?.text || '').replace(/\r\n?/g, '\n').trim();
+          const originalMatch = parseScreenshotText(originalText, { product: matchingProduct });
+          if (!originalMatch.matchError && originalMatch.matchedBy === 'sku' && originalMatch.loc) {
+            job.completed = true;
+            report('库位与 SKU 匹配完成，请核对', 1);
+            return { text: originalText, mode: 'full', scope: 'image', language: job.entry.language };
+          }
         }
       }
       const location = targetedFastPass ? '' : fastLocation(result.data?.text);
@@ -305,6 +472,7 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
         preserve_interword_spaces: '1',
         user_defined_dpi: '150',
       }));
+      job.recognitionRange = [0.86, 0.98];
       result = await wait(job.worker.recognize(image, {}, { text: true }));
     }
     if (job.stopped || signal?.aborted) throw abortError();
@@ -315,7 +483,7 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
     }
     job.completed = true;
     report('识别完成，请核对名称、库位和编码', 1);
-    return { text, mode: 'full', scope: 'image' };
+    return { text, mode: 'full', scope: 'image', language: 'full' };
   } catch (error) {
     if (error?.name === 'AbortError') throw error;
     // Deliberate validation errors are already user-readable Chinese.
