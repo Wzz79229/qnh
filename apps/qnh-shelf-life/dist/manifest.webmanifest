@@ -1,0 +1,17 @@
+{
+  "id": "./",
+  "name": "鲜期 · 牵牛花保质期管理",
+  "short_name": "鲜期",
+  "description": "记录商品批次，追踪到期日期，与团队共享库存。",
+  "lang": "zh-CN",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f5f4ee",
+  "theme_color": "#12695a",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

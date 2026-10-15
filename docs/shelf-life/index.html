@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#136c58">
+  <meta name="description" content="牵牛花商品保质期管理。按批次记录，及时处理临期，团队数据同步到 GitHub。">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://api.github.com; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <title>鲜期 · 牵牛花保质期管理</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon-192.png">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./vendor/xlsx.full.min.js" defer></script>
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <svg class="svg-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></symbol>
+    <symbol id="i-box" viewBox="0 0 24 24"><path d="m12 3 9 5v8l-9 5-9-5V8l9-5Z M3 8l9 5 9-5 M12 13v8 M7.5 5.5l9 5"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 21v-2a6 6 0 0 1 12 0v2 M16 5a3 3 0 0 1 0 6 M21 21v-2a6 6 0 0 0-4-5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14 M5 12h14"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14 m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 3v12 m-5-5 5 5 5-5 M4 16v5h16v-5"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 17V5 m-5 5 5-5 5 5 M4 17v4h16v-4"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5 M4 17v-5h5 M6 6a8 8 0 0 1 14 6 M4 12a8 8 0 0 0 14 6"/></symbol>
+    <symbol id="i-leaf" viewBox="0 0 24 24"><path d="M20 3C9 2 3 7 5 14s11 8 14 0c1-3 1-7 1-11Z M4 21 15 9"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12 M6 18 18 6"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="m12 3 10 18H2L12 3Z M12 9v5 M12 17v.1"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-4 1-4-2-6-2 M15 22v-4a3.4 3.4 0 0 0-1-2.6c3.3-.4 6.7-1.6 6.7-7.4A5.8 5.8 0 0 0 19.2 4a5.4 5.4 0 0 0-.1-4s-1.3-.4-4.1 1.5a14 14 0 0 0-7.4 0C4.8-.4 3.5 0 3.5 0A5.4 5.4 0 0 0 3.4 4a5.8 5.8 0 0 0-1.5 4c0 5.8 3.4 7 6.7 7.4A3.4 3.4 0 0 0 7.6 18v4" transform="translate(1 1) scale(.9)"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="m15 4 5 5 M4 20l5-1L21 7a2.8 2.8 0 0 0-4-4L5 15l-1 5Z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18 M9 6V3h6v3 M5 6l1 15h12l1-15 M10 10v7 M14 10v7"/></symbol>
+    <symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4 M17 3v4 M3 11h18 M8 15h2 M14 15h2"/></symbol>
+  </defs></svg>
+  <aside class="sidebar">
+    <a class="brand" href="./" aria-label="鲜期首页"><span class="brand-mark"><svg><use href="#i-leaf"/></svg></span><span>鲜期<small>牵牛花商品管理</small></span></a>
+    <div class="workspace-label">工作空间 <span>WORKSPACE</span></div>
+    <nav class="desktop-nav" aria-label="主导航"></nav>
+    <div class="side-note"><span class="small-orbit"></span><strong>新鲜，从每一批开始</strong><p>记录、巡检、处理。<br>让商品流转井然有序。</p></div>
+    <button class="sidebar-bottom" data-action="install"><svg class="icon"><use href="#i-down"/></svg>添加到手机桌面<svg class="icon"><use href="#i-arrow"/></svg></button>
+  </aside>
+  <div class="app-shell">
+    <header class="topbar"><span class="breadcrumb">工作空间 <span>/</span> <b id="page-label">保质期总览</b></span><div class="topbar-right"><button id="sync-pill" class="sync-pill" data-action="team"><span class="status-dot"></span><span>尚未连接</span></button><span class="avatar" id="user-avatar">鲜</span></div></header>
+    <main id="main" tabindex="-1"></main>
+    <footer class="app-footer"><span>鲜期 <b>·</b> 牵牛花保质期管理</span><span>每一批新鲜，都有迹可循</span></footer>
+  </div>
+  <nav class="bottom-nav" aria-label="手机主导航"></nav>
+  <dialog id="record-dialog" class="sheet-dialog"></dialog>
+  <dialog id="import-dialog" class="sheet-dialog"></dialog>
+  <dialog id="confirm-dialog" class="small-dialog"></dialog>
+  <dialog id="conflict-dialog" class="small-dialog"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <noscript><div class="noscript">请开启 JavaScript 后使用鲜期。</div></noscript>
+</body>
+</html>
