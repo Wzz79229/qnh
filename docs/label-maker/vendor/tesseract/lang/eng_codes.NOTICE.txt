@@ -1,0 +1,10 @@
+eng_codes.traineddata.gz is a warehouse-code variant of eng.traineddata.gz
+from the same tessdata_fast upstream revision recorded in upstream-commit.txt.
+
+It removes only TESSDATA_LSTM_SYSTEM_DAWG (component 19, the English word
+dictionary). The LSTM network, character set, recoder, punctuation and number
+dictionaries and version are retained byte-for-byte. Used only for ASCII
+location codes and SKU digits; full Chinese/English OCR uses the original data.
+
+The upstream Apache License 2.0 in LICENSE continues to apply.
+The conversion can be reproduced with tools/make-eng-codes.cjs in this repo.

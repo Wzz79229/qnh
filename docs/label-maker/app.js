@@ -1,5 +1,8 @@
 import {renderLabel,encodePng,parseProductText,parseScreenshotText,mergeProductSources} from './label.js?v=20261015-3';
 import {prepareLabelImage,saveLabelImage,shareLabelImage,capabilities,cleanup} from './save-image.js?v=20261015-2';
+import {ensureAssetCache} from './asset-cache.js?v=20261015-5';
+
+void ensureAssetCache();
 
 const $=id=>document.getElementById(id);
 const fieldNames={name:'商品名称',spec:'规格',sku:'完整 SKU',loc:'库位'};
@@ -9,12 +12,13 @@ const recognitionCache=new WeakMap();
 let saveFocus=null;
 let recognitionRuntime=null,autoTimer=null,autoQueued=false,autoSubmitting=false;
 function loadRecognitionRuntime(){
-  if(!recognitionRuntime)recognitionRuntime=import('./ocr.js?v=20261015-4').catch(error=>{recognitionRuntime=null;throw error;});
+  if(!recognitionRuntime)recognitionRuntime=import('./ocr.js?v=20261015-5').catch(error=>{recognitionRuntime=null;throw error;});
   return recognitionRuntime;
 }
 function warmRecognition(){
   try{const known=mergeProductSources(parseProductText($('product-text').value.trim()),{});if(!known.name||!known.spec||!/^\d{10,64}$/.test(known.sku)||known.loc)return;}catch{return;}
-  void loadRecognitionRuntime().then(module=>module.warmupRecognition({mode:'location'})).catch(()=>{});
+  // Prepare the small matcher without downloading the fallback engine/model.
+  void loadRecognitionRuntime().catch(()=>{});
 }
 function queueAutoGeneration(){
   clearTimeout(autoTimer);autoQueued=false;

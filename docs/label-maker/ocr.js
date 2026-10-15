@@ -1,5 +1,7 @@
 /** Browser-only OCR. Images stay in memory; only bundled OCR assets are loaded. */
 import { parseScreenshotText } from './label.js?v=20261015-3';
+import { ensureAssetCache } from './asset-cache.js?v=20261015-5';
+import { recognizeLocationFast } from './lightweight-location-ocr.js?v=20261015-5';
 
 const ASSET_ROOT = new URL('./vendor/tesseract/', import.meta.url);
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
@@ -243,7 +245,7 @@ function createResident(language, runtime) {
   resident = entry;
   // Publish the promise before loading the runtime. Foreground OCR can attach
   // to an initializer already started while the image picker was open.
-  entry.promise = (runtime ? Promise.resolve(runtime) : loadRuntime()).then(Tesseract => Tesseract.createWorker(language === 'location' ? ['eng'] : ['chi_sim', 'eng'], 1, {
+  entry.promise = (runtime ? Promise.resolve(runtime) : loadRuntime()).then(Tesseract => Tesseract.createWorker(language === 'location' ? ['eng_codes'] : ['chi_sim', 'eng'], 1, {
     workerPath: new URL('worker.min.js', ASSET_ROOT).href,
     corePath: new URL('core/', ASSET_ROOT).href.replace(/\/$/, ''),
     langPath: new URL('lang/', ASSET_ROOT).href.replace(/\/$/, ''),
@@ -362,20 +364,18 @@ function fastLocation(text) {
  * @param {{onProgress?: (value: {status: string, progress: number}) => void,
  * signal?: AbortSignal, mode?: 'full'|'location',
  * product?: {sku?: string, name?: string, spec?: string}, targetSku?: string}} [options]
- * @returns {Promise<{text: string, mode: 'full'|'location', scope?: 'image'|'cards', language?: 'full'|'location'}>}
+ * @returns {Promise<{text: string, mode: 'full'|'location', scope?: 'image'|'cards'|'target', language?: 'full'|'location'|'templates'}>}
  * Full OCR text or a normalized, repeated location field; identifiers are never
  * substituted. `scope: 'image'` means all visible cards were read, so the text
  * may be reused when matching a different product in the same screenshot.
  * `scope: 'cards'` contains detected card headers, not the complete image;
  * reuse it only after matching the new product's identity again.
+ * `scope: 'target'` must only be reused for the original target SKU.
  */
 export async function recognizeScreenshot(file, { onProgress, signal, mode = 'full', product, targetSku } = {}) {
   if (signal?.aborted) throw abortError();
   validateFile(file);
   if (activeJob) throw new Error('已有图片正在识别，请先取消或等待完成。');
-  if (typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') {
-    throw new Error('当前浏览器不支持本地识别，请使用新版 Safari 或 Chrome。');
-  }
   // A pasted product identifies which card matters. A crop near the top cannot
   // establish that association: its location might belong to a different SKU.
   // Read the complete screenshot and match the target SKU before accepting a
@@ -411,10 +411,29 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
   const timeout = setTimeout(() => stop(new Error('本地识别耗时过长，请裁剪截图后重试。')), 180_000);
   try {
     report('正在准备截图', 0.02);
+    if (targetedFastPass) {
+      report('正在快速核对截图中的库位和 SKU', 0.04);
+      const fast = await wait(recognizeLocationFast(file, { sku: matchingProduct.sku, signal }));
+      if (job.stopped || signal?.aborted) throw abortError();
+      if (fast) {
+        const matched = parseScreenshotText(fast.text, { product: matchingProduct });
+        if (!matched.matchError && matched.matchedBy === 'sku' && matched.loc === fast.loc) {
+          job.completed = true;
+          report('库位与 SKU 匹配完成，请核对', 1);
+          // The lightweight result is valid for this target only. Other card
+          // locations have not passed its target-specific ambiguity checks.
+          return { text: fast.text, mode: 'full', scope: 'target', language: 'templates' };
+        }
+      }
+    }
+    if (typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') {
+      throw new Error('当前浏览器不支持本地识别，请使用新版 Safari 或 Chrome。');
+    }
     const compact = targetedFastPass ? await prepareCompactCards(file, signal, wait) : null;
     let image = compact || await prepareImage(file, signal, wait, job.mode, targetedFastPass);
     job.stage = '加载组件';
     report('正在加载本地识别组件，首次使用需要稍等', 0.08);
+    await wait(ensureAssetCache());
     const Tesseract = await wait(loadRuntime());
     await acquireWorker(Tesseract, job.mode, job, wait, report);
     job.stage = '识别文字';
@@ -496,10 +515,7 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
     signal?.removeEventListener('abort', cancel);
     job.stopped = true;
     if (!job.completed) await disposeResident(job.entry || resident);
-    else if (resident === job.entry) {
-      const entry = job.entry;
-      idleTimer = setTimeout(() => { if (!activeJob) void disposeResident(entry); }, WORKER_IDLE_MS);
-    }
+    else if (resident) idleRelease(resident);
     if (activeJob === job) activeJob = null;
   }
 }
