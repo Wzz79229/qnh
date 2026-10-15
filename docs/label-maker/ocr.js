@@ -1,10 +1,10 @@
 /** Browser-only OCR. Images stay in memory; only bundled OCR assets are loaded. */
-import { parseScreenshotText } from './label.js?v=20261015-6';
-import { ensureAssetCache } from './asset-cache.js?v=20261015-6';
-import { prepareOcrAssets } from './asset-loader.js?v=20261015-6';
+import { parseScreenshotText } from './label.js?v=20261015-7';
+import { ensureAssetCache } from './asset-cache.js?v=20261015-7';
+import { prepareOcrAssets } from './asset-loader.js?v=20261015-7';
 import { recognizeLocationFast } from './lightweight-location-ocr.js?v=20261015-5';
-import { prepareMetadataSheet, validateMetadataResult, validateKnownSkuText } from './metadata-ocr.js?v=20261015-6';
-export { validateKnownSkuText } from './metadata-ocr.js?v=20261015-6';
+import { prepareMetadataSheet, validateMetadataCardsResult, validateSpatialSkuResult, validateKnownSkuText } from './metadata-ocr.js?v=20261015-7';
+export { validateKnownSkuText } from './metadata-ocr.js?v=20261015-7';
 
 const ASSET_ROOT = new URL('./vendor/tesseract/', import.meta.url);
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
@@ -327,7 +327,7 @@ async function acquireWorker(Tesseract, language, job, wait, report) {
   return job.worker;
 }
 
-/** Start public OCR asset loading after an image action, without reading a file.
+/** Start public OCR asset loading on page open or an image action, without reading a file.
  * Returns false on failure; foreground recognition can retry normally.
  */
 export function warmupRecognition({ mode = 'location' } = {}) {
@@ -355,6 +355,26 @@ export function releaseRecognition() {
   clearTimeout(idleTimer);
   if (activeJob) activeJob.stop(abortError());
   return disposeResident();
+}
+
+/** Prepare public resources on page open. Full dictionaries load in the
+ * background without replacing the already usable coding worker. */
+export async function preloadRecognitionResources({ onProgress } = {}) {
+  const notify = value => { try { onProgress?.(value); } catch {} };
+  notify({stage:'codes',progress:0,status:'正在提前准备图片识别资源…'});
+  const assets = prepareOcrAssets({mode:'location',onProgress:message=>notify({
+    stage:'codes',progress:message.progress*.6,status:'正在提前准备库位和编码识别…',
+  })});
+  const ready = await warmupRecognition({mode:'location'});
+  await assets;
+  if (!ready) return {codesReady:false,fullReady:false};
+  notify({stage:'codes-ready',progress:.6,status:'库位和编码识别已准备，中文字库在后台加载…'});
+  const full = await prepareOcrAssets({mode:'full',onProgress:message=>notify({
+    stage:'dictionaries',progress:.6+message.progress*.4,status:'常用识别已准备，中文字库在后台加载…',
+  })});
+  if (!full.prefetched) return {codesReady:true,fullReady:false};
+  notify({stage:'ready',progress:1,status:'图片识别资源和中文字库已准备'});
+  return {codesReady:true,fullReady:true};
 }
 
 function locationCandidates(text) {
@@ -440,7 +460,9 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
       // that cannot use the optional lightweight first-picture shortcut.
       void warmupRecognition({ mode: 'location' });
       report('正在快速核对截图中的库位和 SKU', 0.04);
-      const fast = await wait(recognizeLocationFast(file, { sku: matchingProduct.sku, signal }));
+      let fast = null;
+      try { fast = await wait(recognizeLocationFast(file, { sku: matchingProduct.sku, signal })); }
+      catch (error) { if (error?.name === 'AbortError' || job.stopped) throw error; }
       if (job.stopped || signal?.aborted) throw abortError();
       if (fast) {
         const matched = parseScreenshotText(fast.text, { product: matchingProduct });
@@ -457,7 +479,9 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
       throw new Error('当前浏览器不支持本地识别，请使用新版 Safari 或 Chrome。');
     }
     if (targetedFastPass) {
-      const metadata = await wait(prepareMetadataSheet(file, { signal }));
+      let metadata = null;
+      try { metadata = await wait(prepareMetadataSheet(file, { signal })); }
+      catch (error) { if (error?.name === 'AbortError' || job.stopped) throw error; }
       let image = metadata?.blob || await prepareImage(file, signal, wait, 'location', true);
       job.stage = '加载组件';
       report('正在准备图片识别，组件会在换商品后继续复用', 0.08);
@@ -469,22 +493,58 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
         tessedit_char_whitelist: '', preserve_interword_spaces: '1', user_defined_dpi: '150',
       }));
       job.recognitionRange = [0.48, 0.76];
-      let result = await wait(job.worker.recognize(image, {}, { text: true }));
+      let result = await wait(job.worker.recognize(image, {}, { text: true, blocks: true }));
       let matched = metadata
-        ? validateMetadataResult(result.data?.text, matchingProduct.sku, metadata.cards.length, parseScreenshotText)
-        : validateKnownSkuText(result.data?.text, matchingProduct.sku, parseScreenshotText);
+        ? validateMetadataCardsResult(result.data, matchingProduct.sku, metadata, parseScreenshotText)
+        : validateSpatialSkuResult(result.data, matchingProduct.sku, parseScreenshotText);
       if (!matched && metadata) {
         // A second pass retains native glyph size for low-resolution images.
         // It uses this same small coding model and never loads Chinese data.
         report('正在用原始文字尺寸核对库位和编码', 0.76);
-        const native = await wait(prepareMetadataSheet(file, { signal, normalizeHeight: 0 }));
+        let native = null;
+        try { native = await wait(prepareMetadataSheet(file, { signal, normalizeHeight: 0 })); }
+        catch (error) { if (error?.name === 'AbortError' || job.stopped) throw error; }
         image = native?.blob || await prepareImage(file, signal, wait, 'location', true);
         await wait(job.worker.setParameters({tessedit_pageseg_mode: native ? (Tesseract.PSM.SINGLE_BLOCK ?? 6) : Tesseract.PSM.SPARSE_TEXT}));
         job.recognitionRange = [0.76, 0.98];
-        result = await wait(job.worker.recognize(image, {}, { text: true }));
+        result = await wait(job.worker.recognize(image, {}, { text: true, blocks: true }));
         matched = native
-          ? validateMetadataResult(result.data?.text, matchingProduct.sku, native.cards.length, parseScreenshotText)
-          : validateKnownSkuText(result.data?.text, matchingProduct.sku, parseScreenshotText);
+          ? validateMetadataCardsResult(result.data, matchingProduct.sku, native, parseScreenshotText)
+          : validateSpatialSkuResult(result.data, matchingProduct.sku, parseScreenshotText);
+      }
+      if (!matched && metadata) {
+        // Optional geometry is only a shortcut. Unknown layouts continue with
+        // the complete image and spatial SKU/location evidence automatically.
+        report('正在识别完整图片，按 SKU 查找对应库位', 0.78);
+        image = await prepareImage(file, signal, wait, 'location', true);
+        await wait(job.worker.setParameters({tessedit_pageseg_mode:Tesseract.PSM.SPARSE_TEXT}));
+        job.recognitionRange = [0.78, 0.84];
+        result = await wait(job.worker.recognize(image, {}, {text:true,blocks:true}));
+        matched = validateSpatialSkuResult(result.data, matchingProduct.sku, parseScreenshotText);
+      }
+      if (!matched) {
+        // Native pixels and automatic page segmentation are a second general
+        // read; this does not assume a badge, sidebar, aspect ratio or card size.
+        report('正在用原图重新核对编码与库位位置', 0.84);
+        await wait(job.worker.setParameters({tessedit_pageseg_mode:Tesseract.PSM.AUTO ?? 3}));
+        job.recognitionRange = [0.84, 0.90];
+        result = await wait(job.worker.recognize(file, {}, {text:true,blocks:true}));
+        matched = validateSpatialSkuResult(result.data, matchingProduct.sku, parseScreenshotText);
+      }
+      if (!matched) {
+        // Difficult text is retried with the existing bilingual engine. Public
+        // assets may already be downloaded by the background preloader.
+        job.mode = 'full';job.stage = '加载组件';
+        report('正在切换完整文字识别，继续核对商品与库位', 0.90);
+        await acquireWorker(Tesseract, 'full', job, wait, report);
+        job.stage = '识别文字';
+        for (const psm of [Tesseract.PSM.SPARSE_TEXT, Tesseract.PSM.AUTO ?? 3]) {
+          await wait(job.worker.setParameters({tessedit_pageseg_mode:psm,tessedit_char_whitelist:'',preserve_interword_spaces:'1',user_defined_dpi:'150'}));
+          job.recognitionRange = [0.90, 0.98];
+          result = await wait(job.worker.recognize(file, {}, {text:true,blocks:true}));
+          matched = validateSpatialSkuResult(result.data, matchingProduct.sku, parseScreenshotText);
+          if (matched) break;
+        }
       }
       if (job.stopped || signal?.aborted) throw abortError();
       if (!matched) {
@@ -495,7 +555,7 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
       }
       job.completed = true;
       report('库位与 SKU 匹配完成，请核对', 1);
-      return { text: matched.ocrText, mode: 'full', scope: 'cards', language: 'location' };
+      return { text: matched.ocrText, mode: 'full', scope: 'target', language: job.entry.language };
     }
     let image = await prepareImage(file, signal, wait, job.mode);
     job.stage = '加载组件';

@@ -25,18 +25,33 @@ function asString(value) {
 // QNH appends a per-item weight/capacity conversion to the actual specification.
 // Remove only that complete trailing metadata group; option and pack-size groups
 // such as （灰色）, （L码） and （500ml*2瓶） remain part of the specification.
+function trailingParentheticalGroup(text) {
+  const closing = text.at(-1);
+  if (closing !== ')' && closing !== '）') return null;
+  const stack = [];
+  for (let index = text.length - 1; index >= 0; index--) {
+    const character = text[index];
+    if (character === ')' || character === '）') stack.push(character);
+    else if (character === '(' || character === '（') {
+      if (stack.pop() !== (character === '(' ? ')' : '）')) return null;
+      if (!stack.length) return {index, value: text.slice(index + 1, -1)};
+    }
+  }
+  return null;
+}
+
 function cleanSpecification(value) {
   let text = value.trim();
   while (text) {
-    const suffix = text.match(/(?:\(([^（）()]*)\)|（([^（）()]*)）)\s*$/);
+    const suffix = trailingParentheticalGroup(text);
     if (!suffix) break;
     const primary = text.slice(0, suffix.index).trimEnd();
     if (!primary) break;
-    const metadata = (suffix[1] ?? suffix[2]).normalize('NFKC').replace(/\s+/g, '').toLowerCase();
-    if (!/^(?:(?:净重|重量|净含量)[:：]?)?(?:\d+(?:\.\d+)?|\.\d+)(?:kg|mg|g|千克|公斤|毫克|克|ml|l|毫升|升)\/(?:\d+)?(?:份|瓶|袋|包|盒|罐|桶|箱|杯|支|个|件|套|组|粒|片|条|卷|张|双|只|颗|块|提)$/.test(metadata)) break;
+    const metadata = suffix.value.normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+    if (!/^(?:(?:净重|重量|净含量)[:：]?)?(?:\d+(?:\.\d+)?|\.\d+)(?:(?:千克|公斤)\(kg\)|毫克\(mg\)|克\(g\)|毫升\(ml\)|升\(l\)|kg|mg|g|千克|公斤|毫克|克|ml|l|毫升|升)\/(?:\d+)?(?:份|瓶|袋|包|盒|罐|桶|箱|杯|支|个|件|套|组|粒|片|条|卷|张|双|只|颗|块|提)$/.test(metadata)) break;
     text = primary;
   }
-  return text;
+  return /^(?:null|空)$/i.test(text.normalize('NFKC')) ? '' : text;
 }
 
 function barcodeFor(sku) {
@@ -230,7 +245,7 @@ function validSku(value) {
 /** Parse explicit field labels only. UPC never fills an absent/truncated SKU. */
 export function parseProductText(text) {
   if (typeof text !== 'string') throw new Error('请粘贴商品信息文字。');
-  const result = {name: '', spec: '', sku: '', loc: '', upc: '', warnings: []};
+  const result = {name: '', spec: '', sku: '', loc: '', upc: '', warnings: [], specProvided: false, specExplicitEmpty: false};
   const expression = /(?:^|[\r\n;；])[ \t]*(商品名称|货品名称|名称|商品|规格|sku编号|sku码|sku|库位号|库位码|库位|location|loc|name|spec|upc码|upc|商品条码|条码)[ \t]*[:：][ \t]*/gi;
   const matches = [...text.matchAll(expression)];
   matches.forEach((match, index) => {
@@ -240,6 +255,10 @@ export function parseProductText(text) {
     const value = key === 'spec' ? cleanSpecification(rawValue) : rawValue;
     if (result[key] && result[key] !== value) result.warnings.push(`同一字段出现了不同内容：${match[1]}。请核对。`);
     result[key] = value;
+    if (key === 'spec') {
+      result.specProvided = true;
+      result.specExplicitEmpty = value === '';
+    }
   });
   if (!result.sku) {
     const explicitSku = text.match(/\bsku(?:码|编号)?[ \t]*(?:[:：=]|是|为)[ \t]*([^\r\n;；]+)/i);
@@ -268,7 +287,7 @@ function ocrControlLine(value) {
 /** Conservative extraction for one QNH product card. */
 function parseSingleScreenshotText(text) {
   if (typeof text !== 'string') throw new Error('截图识别结果应为文字。');
-  const result = {name: '', spec: '', sku: '', loc: '', upc: '', warnings: []};
+  const result = {name: '', spec: '', sku: '', loc: '', upc: '', warnings: [], specProvided: false, specExplicitEmpty: false};
   const lines = text.replace(/\u200b/g, '').split(/\r?\n|[；;]/).map(line => line.trim()).filter(Boolean);
   const captured = {name: [], spec: [], sku: [], loc: [], upc: []};
   const metadataIndexes = [];
@@ -297,7 +316,10 @@ function parseSingleScreenshotText(text) {
           value += lines[next++];
         }
       }
-      if (key === 'spec') value = cleanSpecification(value);
+      if (key === 'spec') {
+        value = cleanSpecification(value);
+        result.specProvided = true;
+      }
       if (key === 'loc') {
         value = normalizedLocation(value) || (value ? '' : normalizedLocation(lines[index + 1] || ''));
         locationIndexes.push(index);
@@ -312,6 +334,7 @@ function parseSingleScreenshotText(text) {
     if (values.length === 1) result[key] = values[0];
     else if (values.length > 1) result.warnings.push(`截图中有多个不同的${({name: '商品名称', spec: '规格', sku: 'SKU', loc: '库位', upc: 'UPC'})[key]}，请裁剪到单个商品后重试。`);
   }
+  result.specExplicitEmpty = result.specProvided && captured.spec.length === 0;
   if (!result.loc && captured.loc.length === 0) {
     const candidates = lines.map(line => normalizedLocation(line.replace(/[ \t]*搜索[ \t]*$/, ''))).filter(Boolean);
     const unique = [...new Set(candidates)];
@@ -482,17 +505,25 @@ function comparableField(value) {
 export function mergeProductSources(textResult, imageResult) {
   const text = textResult || {};
   const image = imageResult || {};
-  const merged = {name: '', spec: '', sku: '', loc: '', upc: '', warnings: [], sources: {}};
+  const merged = {name: '', spec: '', sku: '', loc: '', upc: '', warnings: [], sources: {}, specProvided: false, specExplicitEmpty: false};
+  // A deliberately empty specification is a supplied value, not an OCR gap.
+  // Older callers can also pass the raw null sentinel without parser flags.
+  const textSpecProvided = text.specProvided === true || text.specExplicitEmpty === true ||
+    typeof text.spec === 'string' && Boolean(text.spec.trim()) && cleanSpecification(text.spec) === '';
+  const imageSpecProvided = image.specProvided === true || image.specExplicitEmpty === true ||
+    typeof image.spec === 'string' && Boolean(image.spec.trim()) && cleanSpecification(image.spec) === '';
   const labels = {name: '商品名称', spec: '规格', sku: 'SKU', loc: '库位', upc: 'UPC'};
   for (const key of ['name', 'spec', 'sku', 'loc', 'upc']) {
     const textValue = typeof text[key] === 'string' ? (key === 'spec' ? cleanSpecification(text[key]) : text[key].trim()) : '';
     const imageValue = typeof image[key] === 'string' ? (key === 'spec' ? cleanSpecification(image[key]) : image[key].trim()) : '';
-    const hasText = Boolean(textValue) && (key !== 'sku' || validSku(textValue));
-    const hasImage = Boolean(imageValue) && (key !== 'sku' || validSku(imageValue));
+    const hasText = key === 'spec' && textSpecProvided || Boolean(textValue) && (key !== 'sku' || validSku(textValue));
+    const hasImage = key === 'spec' && imageSpecProvided || Boolean(imageValue) && (key !== 'sku' || validSku(imageValue));
     merged[key] = hasText ? textValue : hasImage ? imageValue : '';
     merged.sources[key] = hasText ? 'text' : hasImage ? 'image' : '';
     if (hasText && hasImage && comparableField(textValue) !== comparableField(imageValue)) merged.warnings.push(`${labels[key]}的文字与截图识别结果不同，已采用文字内容，请核对。`);
   }
+  merged.specProvided = textSpecProvided || imageSpecProvided || Boolean(merged.spec);
+  merged.specExplicitEmpty = merged.specProvided && merged.spec === '';
   for (const warning of [...(text.warnings || []), ...(image.warnings || [])]) {
     if (merged.name && warning.startsWith('未能可靠识别商品名称')) continue;
     if (merged.loc && warning.startsWith('未能可靠识别库位')) continue;

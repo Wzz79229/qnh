@@ -8,7 +8,7 @@
   <title>库位标签 · 图片生成器</title>
   <link rel="icon" href="./icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="./style.css">
-  <link rel="stylesheet" href="./composer.css?v=20261015-6">
+  <link rel="stylesheet" href="./composer.css?v=20261015-7">
 </head>
 <body>
   <a class="skip" href="#editor">跳到商品信息</a>
@@ -24,6 +24,7 @@
     <div class="workspace">
       <section class="editor card" id="editor" aria-labelledby="editor-title">
         <div class="section-head"><div><span class="step">01</span><h2 id="editor-title">放入商品信息</h2></div><button id="example" class="text-button" type="button">试用示例 <span aria-hidden="true">↗</span></button></div>
+        <div class="resource-readiness" role="status" aria-live="polite"><div><span id="resource-status">正在提前准备图片识别资源…</span><button id="retry-resources" type="button" hidden>重新准备</button></div><progress id="resource-progress" max="1" value="0" aria-label="识别资源准备进度"></progress></div>
         <form id="product-form" novalidate>
           <label class="composer-label" for="product-text">整段文字和截图放在这里</label>
           <div class="composer" id="composer">
@@ -70,6 +71,6 @@
       <p class="save-sheet-help">苹果手机可在系统菜单中选“存储图像”或“存储到文件”。若 App 内无法保存，请用 Safari 或手机浏览器打开本页。</p>
     </div>
   </section>
-  <script type="module" src="./app.js?v=20261015-6"></script>
+  <script type="module" src="./app.js?v=20261015-7"></script>
 </body>
 </html>

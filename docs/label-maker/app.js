@@ -1,6 +1,6 @@
-import {renderLabel,encodePng,parseProductText,parseScreenshotText,mergeProductSources} from './label.js?v=20261015-6';
+import {renderLabel,encodePng,parseProductText,parseScreenshotText,mergeProductSources} from './label.js?v=20261015-7';
 import {prepareLabelImage,saveLabelImage,shareLabelImage,capabilities,cleanup} from './save-image.js?v=20261015-2';
-import {ensureAssetCache} from './asset-cache.js?v=20261015-6';
+import {ensureAssetCache} from './asset-cache.js?v=20261015-7';
 
 void ensureAssetCache();
 
@@ -11,22 +11,41 @@ let imageFile=null,thumbnailUrl=null,controller=null;
 const recognitionCache=new WeakMap();
 let saveFocus=null;
 let recognitionRuntime=null,autoTimer=null,autoQueued=false,autoSubmitting=false;
+let preloadTask=null;
 function loadRecognitionRuntime(){
-  if(!recognitionRuntime)recognitionRuntime=import('./ocr.js?v=20261015-6').catch(error=>{recognitionRuntime=null;throw error;});
+  if(!recognitionRuntime)recognitionRuntime=import('./ocr.js?v=20261015-7').catch(error=>{recognitionRuntime=null;throw error;});
   return recognitionRuntime;
 }
 function warmRecognition(){
-  try{const known=mergeProductSources(parseProductText($('product-text').value.trim()),{});if(!known.name||!known.spec||!/^\d{10,64}$/.test(known.sku)||known.loc)return;}catch{return;}
+  try{const known=mergeProductSources(parseProductText($('product-text').value.trim()),{});if(!known.name||!(known.spec||known.specExplicitEmpty)||!/^\d{10,64}$/.test(known.sku)||known.loc)return;}catch{return;}
   // All numeric SKU/location screenshots share the same coding engine, so
   // prepare it while the image picker is open and reuse it across products.
   void loadRecognitionRuntime().then(module=>module.warmupRecognition({mode:'location'})).catch(()=>{});
 }
+function preloadRecognition(){
+  if(preloadTask)return preloadTask;
+  $('retry-resources').hidden=true;$('resource-progress').hidden=false;
+  $('resource-status').textContent='正在提前准备图片识别资源…';
+  preloadTask=loadRecognitionRuntime().then(module=>module.preloadRecognitionResources({onProgress:info=>{
+    if($('resource-status').textContent!==info.status)$('resource-status').textContent=info.status;
+    $('resource-progress').value=info.progress;
+  }})).then(result=>{
+    if(result.fullReady){$('resource-status').textContent='图片识别资源和中文字库已准备';$('resource-progress').hidden=true;}
+    else{$('resource-status').textContent=result.codesReady?'常用识别已准备，完整字库尚未准备完成。':'识别资源尚未准备完成，可以继续输入或稍后重试。';$('retry-resources').hidden=false;$('resource-progress').hidden=true;}
+  }).catch(()=>{
+    $('resource-status').textContent='提前加载尚未完成，可稍后重试；生成时也会继续尝试。';
+    $('retry-resources').hidden=false;$('resource-progress').hidden=true;
+  }).finally(()=>{preloadTask=null;});
+  return preloadTask;
+}
+$('retry-resources').onclick=preloadRecognition;
+void preloadRecognition();
 function queueAutoGeneration(){
   clearTimeout(autoTimer);autoQueued=false;
   if(!imageFile)return;
   let known;
   try{known=mergeProductSources(parseProductText($('product-text').value.trim()),{});}catch{return;}
-  if(!known.name||!known.spec||!/^\d{10,64}$/.test(known.sku))return;
+  if(!known.name||!(known.spec||known.specExplicitEmpty)||!/^\d{10,64}$/.test(known.sku))return;
   autoQueued=true;
   if(generating)return;
   const expectedRevision=revision;
@@ -135,7 +154,7 @@ function showSummary(record,ocrText){
   const summary=$('record-summary');summary.replaceChildren();
   for(const key of ['name','spec','sku','loc']){
     const row=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');
-    dt.textContent=fieldNames[key];dd.textContent=record[key]||(key==='spec'?'未提供':'待补充');
+    dt.textContent=fieldNames[key];dd.textContent=record[key]||(key==='spec'&&record.specExplicitEmpty?'无规格':key==='spec'?'未提供':'待补充');
     if(!record[key]&&key!=='spec')dd.classList.add('missing');
     if(record.sources?.[key]){const source=document.createElement('small');source.textContent=record.sources[key]==='text'?'文字':'图片';dt.append(source);}
     row.append(dt,dd);summary.append(row);
@@ -165,10 +184,10 @@ $('product-form').addEventListener('submit',async event=>{
     const textResult=parseProductText(text);
     const known=mergeProductSources(textResult,{});
     if(file){
-      if(known.name&&known.sku&&known.spec&&known.loc){
+      if(known.name&&known.sku&&(known.spec||known.specExplicitEmpty)&&known.loc){
         recognitionMessage='文字信息已完整，直接生成标签。';
       }else{
-        const mode=known.name&&known.sku&&known.spec?'location':'full';
+        const mode=known.name&&known.sku&&(known.spec||known.specExplicitEmpty)?'location':'full';
         const cacheKey=JSON.stringify([mode,known.sku||known.name,known.sku?'':known.spec]);
         const cache=recognitionCache.get(file);
         let cachedText=cache?.get(cacheKey);

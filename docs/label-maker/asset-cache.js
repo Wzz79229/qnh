@@ -1,6 +1,6 @@
 /** Best-effort persistent cache for public OCR files, with bounded setup. */
 const BASE = new URL('./', import.meta.url);
-const SCRIPT = new URL('ocr-assets-sw.js?v=20261015-6', BASE);
+const SCRIPT = new URL('ocr-assets-sw.js?v=20261015-7', BASE);
 const READY_TIMEOUT_MS = 2500;
 let setup = null;
 

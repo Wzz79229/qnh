@@ -1,8 +1,9 @@
 /** Parallel preparation of public OCR assets. No files or product data enter here. */
-import { ensureAssetCache } from './asset-cache.js?v=20261015-6';
+import { ensureAssetCache } from './asset-cache.js?v=20261015-7';
 
 const ROOT = new URL('./vendor/tesseract/', import.meta.url);
 const prepared = new Map();
+const ASSET_TIMEOUT_MS = 90_000;
 const CORE_LENGTHS = {
   'tesseract-core-lstm.wasm.js': 3896484,
   'tesseract-core-simd-lstm.wasm.js': 3899472,
@@ -51,22 +52,26 @@ export async function prepareOcrAssets({ mode = 'location', onProgress } = {}) {
       for (const listener of entry.listeners) { try { listener(entry.latest); } catch { /* Rendering cannot stop loading. */ } }
     };
     entry.promise = Promise.all(assets.map(async ([path, expected], index) => {
-      const response = await fetch(new URL(path, ROOT), { credentials: 'same-origin' });
-      if (!response.ok || /text\/html/i.test(response.headers.get('content-type') || '')) throw new Error('Public OCR asset unavailable');
-      if (response.body?.getReader) {
-        const reader = response.body.getReader();
-        try {
-          for (;;) {
-            const chunk = await reader.read();
-            if (chunk.done) break;
-            entry.loaded[index] = Math.min(expected, entry.loaded[index] + chunk.value.byteLength);
-            publish();
-          }
-        } finally { reader.releaseLock(); }
-      } else await response.arrayBuffer();
-      entry.loaded[index] = expected;
-      entry.complete++;
-      publish();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), ASSET_TIMEOUT_MS);
+      try {
+        const response = await fetch(new URL(path, ROOT), { credentials: 'same-origin', signal: controller.signal });
+        if (!response.ok || /text\/html/i.test(response.headers.get('content-type') || '')) throw new Error('Public OCR asset unavailable');
+        if (response.body?.getReader) {
+          const reader = response.body.getReader();
+          try {
+            for (;;) {
+              const chunk = await reader.read();
+              if (chunk.done) break;
+              entry.loaded[index] = Math.min(expected, entry.loaded[index] + chunk.value.byteLength);
+              publish();
+            }
+          } finally { reader.releaseLock(); }
+        } else await response.arrayBuffer();
+        entry.loaded[index] = expected;
+        entry.complete++;
+        publish();
+      } finally { clearTimeout(timer); }
     })).then(() => ({ coreUrl, prefetched: true }), () => {
       // The worker's normal loader remains the fallback if a prefetch fails.
       if (prepared.get(key) === entry) prepared.delete(key);
