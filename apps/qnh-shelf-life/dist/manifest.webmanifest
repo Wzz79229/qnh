@@ -2,7 +2,7 @@
   "id": "./",
   "name": "鲜期 · 牵牛花保质期管理",
   "short_name": "鲜期",
-  "description": "记录商品批次，追踪到期日期，与团队共享库存。",
+  "description": "拍商品包装，识别生产日期与保质期，建立团队商品档案。",
   "lang": "zh-CN",
   "start_url": "./",
   "scope": "./",

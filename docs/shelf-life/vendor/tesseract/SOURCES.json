@@ -1,0 +1,100 @@
+{
+  "tesseractJs": "7.0.0",
+  "tesseractCore": "7.0.0",
+  "tessdataFast": "4.1.0",
+  "license": "Apache-2.0",
+  "engine": "LSTM only (OEM 1), integer fast chi_sim + eng",
+  "fetchedAt": "2026-10-15",
+  "notes": [
+    "All worker/core/model URLs are explicitly same-origin; photos are not sent to an OCR service.",
+    "Core variants cover non-SIMD, SIMD and relaxed SIMD; legacy engine is disabled.",
+    "Language model persistence in IndexedDB is disabled; static assets can be cached by the app Service Worker.",
+    "Sources and hashes below document vendored assets; recognize.worker.js is application-owned adapter code."
+  ],
+  "files": [
+    {
+      "path": "LICENSE.core.txt",
+      "bytes": 11358,
+      "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+      "source": "https://cdn.jsdelivr.net/npm/tesseract.js-core@7.0.0/LICENSE"
+    },
+    {
+      "path": "LICENSE.tessdata.txt",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "source": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.1.0/LICENSE"
+    },
+    {
+      "path": "LICENSE.tesseract.txt",
+      "bytes": 11357,
+      "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1",
+      "source": "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/LICENSE.md"
+    },
+    {
+      "path": "recognize.worker.js",
+      "bytes": 1366,
+      "sha256": "c9fb623121a126785ac40eab94c0262e8652a72fa25114adf83dac837933260e",
+      "source": "Application code"
+    },
+    {
+      "path": "tesseract.min.js",
+      "bytes": 62961,
+      "sha256": "000c27d9cd0def655f77b36c72a389c0ab13793aa31cb4d7aab56d09c0afbc7e",
+      "source": "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js"
+    },
+    {
+      "path": "worker.min.js",
+      "bytes": 111307,
+      "sha256": "576b7df7e3393e137e51849357c9adb53fe7ac1bb69bfa06cf3d61520f182c6d",
+      "source": "https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/worker.min.js"
+    },
+    {
+      "path": "core/tesseract-core-lstm.wasm",
+      "bytes": 2855361,
+      "sha256": "66b17df6e20c5329a17ffa9c202a47eaa3e32500b253d4c7f38e7f2bc01457c3",
+      "source": "https://cdn.jsdelivr.net/npm/tesseract.js-core@7.0.0/tesseract-core-lstm.wasm"
+    },
+    {
+      "path": "core/tesseract-core-lstm.wasm.js",
+      "bytes": 3896484,
+      "sha256": "eef5f8b2f8e20e150680b20adaec4a60babafee3adbe8a94583c81fee46e8680",
+      "source": "https://cdn.jsdelivr.net/npm/tesseract.js-core@7.0.0/tesseract-core-lstm.wasm.js"
+    },
+    {
+      "path": "core/tesseract-core-relaxedsimd-lstm.wasm",
+      "bytes": 2862266,
+      "sha256": "7985c92d4c64e7267d24cadffe1b2a1da6bf8aa55fdcaf953fe94fe122a24545",
+      "source": "https://cdn.jsdelivr.net/npm/tesseract.js-core@7.0.0/tesseract-core-relaxedsimd-lstm.wasm"
+    },
+    {
+      "path": "core/tesseract-core-relaxedsimd-lstm.wasm.js",
+      "bytes": 3905767,
+      "sha256": "861a536cf9ef8e63cb644d57bab39c388f37f7d6b6f60024b741c5f6b39a59b3",
+      "source": "https://cdn.jsdelivr.net/npm/tesseract.js-core@7.0.0/tesseract-core-relaxedsimd-lstm.wasm.js"
+    },
+    {
+      "path": "core/tesseract-core-simd-lstm.wasm",
+      "bytes": 2857601,
+      "sha256": "34e8d50cac216427d86bf397d610fdd9f49492539bbcdfbfccc4eda20c810bea",
+      "source": "https://cdn.jsdelivr.net/npm/tesseract.js-core@7.0.0/tesseract-core-simd-lstm.wasm"
+    },
+    {
+      "path": "core/tesseract-core-simd-lstm.wasm.js",
+      "bytes": 3899472,
+      "sha256": "c58b46a4c796c0b8afccf77591d5b875b6896b45d402bbce8caa6f5362447b38",
+      "source": "https://cdn.jsdelivr.net/npm/tesseract.js-core@7.0.0/tesseract-core-simd-lstm.wasm.js"
+    },
+    {
+      "path": "lang/chi_sim.traineddata",
+      "bytes": 2469156,
+      "sha256": "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730",
+      "source": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.1.0/chi_sim.traineddata"
+    },
+    {
+      "path": "lang/eng.traineddata",
+      "bytes": 4113088,
+      "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
+      "source": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.1.0/eng.traineddata"
+    }
+  ]
+}

@@ -1,13 +1,17 @@
 /* Cache only the published application shell. Business data and credentials never enter this cache. */
 const CACHE_PREFIX = 'xianqi-shell-';
-const CACHE_NAME = `${CACHE_PREFIX}v2`;
+const CACHE_NAME = `${CACHE_PREFIX}v3-photo`;
 const SHELL = [
   './', './index.html', './styles.css', './app.mjs', './core.mjs', './github.mjs',
   './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png',
   './icons/icon-512.png', './icons/maskable-512.png',
-  './vendor/xlsx.full.min.js', './import-template.csv',
+  './cloud.mjs', './connection.json', './photo-flow.mjs', './photo-parser.mjs', './photo-sync.mjs', './ocr.mjs',
 ];
-const shellURLs = new Set(SHELL.map((entry) => new URL(entry, self.registration.scope).href));
+// OCR models are cached only after first use, rather than forcing a large initial install.
+const OCR = ['./vendor/tesseract/recognize.worker.js','./vendor/tesseract/tesseract.min.js','./vendor/tesseract/worker.min.js',
+  ...['lstm','simd-lstm','relaxedsimd-lstm'].flatMap(kind=>['wasm.js','wasm'].map(ext=>`./vendor/tesseract/core/tesseract-core-${kind}.${ext}`)),
+  './vendor/tesseract/lang/chi_sim.traineddata','./vendor/tesseract/lang/eng.traineddata'];
+const shellURLs = new Set([...SHELL,...OCR].map((entry) => new URL(entry, self.registration.scope).href));
 const indexURL = new URL('./index.html', self.registration.scope).href;
 
 self.addEventListener('install', (event) => {

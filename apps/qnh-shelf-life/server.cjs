@@ -21,6 +21,10 @@ const types = {
   '.csv': 'text/csv; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
   '.ico': 'image/x-icon',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.wasm': 'application/wasm',
+  '.traineddata': 'application/octet-stream',
 };
 
 function insideRoot(filename) {

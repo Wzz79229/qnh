@@ -1,0 +1,17 @@
+name = "qnh-shelf-life-api"
+main = "worker.mjs"
+compatibility_date = "2026-10-15"
+workers_dev = true
+
+[vars]
+ALLOWED_ORIGIN = "https://wzz79229.github.io"
+
+# Optional same-origin PWA hosting avoids mobile third-party-cookie restrictions.
+# The deployed bundle includes imported ../dist/core.mjs and ../dist/github.mjs.
+[assets]
+directory = "../dist"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
+
+# GITHUB_TOKEN, TEAM_PASSWORD and SESSION_SECRET must be configured as runtime
+# secrets by the administrator. Never put secret values in this file or Git.

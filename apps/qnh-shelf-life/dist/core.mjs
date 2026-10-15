@@ -197,6 +197,18 @@ export function validateRecord(input, { strict = false } = {}) {
   record.status = ['active', '正常', '在库', '未处理'].includes(status) ? 'active'
     : ['handled', '已处理'].includes(status) ? 'handled' : null;
   if (!record.status || (strict && (typeof input.status !== 'string' || !input.status.trim()))) errors.push('商品状态无效');
+  if (input.photoRefs !== undefined) {
+    if (!Array.isArray(input.photoRefs) || input.photoRefs.length > 3) errors.push('包装照片引用最多为 3 张');
+    else {
+      const seen = new Set();
+      record.photoRefs = [];
+      for (const ref of input.photoRefs) {
+        if (!isObject(ref) || typeof ref.id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(ref.id)
+          || ref.path !== `photos/${ref.id}.jpg` || seen.has(ref.id)) errors.push('包装照片引用无效或重复');
+        else { seen.add(ref.id); record.photoRefs.push({ id: ref.id, path: ref.path }); }
+      }
+    }
+  }
   for (const field of ['handledAt', 'updatedAt', 'deletedAt']) {
     const value = input[field];
     const absent = value == null || value === '';
