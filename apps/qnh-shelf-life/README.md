@@ -12,7 +12,7 @@
 
 后续修改应同步 `apps/qnh-shelf-life/dist/` 与 `docs/shelf-life/` 的相同文件后提交。独立项目携带的 `.github/workflows/pages.yml` 仅供迁移到单独仓库时使用，在现有 qnh 的子目录内不会触发，不需要更改现有 Pages 设置。
 
-私有数据仓库建议命名 `qnh-shelf-life-data`，创建时勾选 README，然后在 App 的“团队”页连接。
+团队数据使用已初始化的私有仓库 `Wzz79229/bzq`，文件为 `main` 分支的 `data/shelf-life.json`。在 App 的“团队”页填写本人的显示名称与访问令牌后连接。
 
 ## 已实现
 
@@ -46,7 +46,7 @@ npm test
 | 仓库示例 | 用途 | 建议可见性 |
 | --- | --- | --- |
 | `qnh-shelf-life` | 本项目源代码、PWA、Pages 工作流 | 公开，里面不放业务数据和令牌 |
-| `qnh-shelf-life-data` | `data/shelf-life.json` 等团队业务数据 | 私有，仅邀请团队成员 |
+| `bzq` | `data/shelf-life.json` 等团队业务数据 | 私有，仅邀请团队成员 |
 
 两者都保存在 GitHub。公开 Pages 网站可以展示应用界面，但读取私有数据仍需有权限的个人令牌。若只使用一个公开仓库，放入其中的业务数据也会公开。
 
@@ -54,7 +54,7 @@ npm test
 2. 在代码仓库的 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。
 3. 在 **Actions → Deploy 鲜期 to GitHub Pages** 手动运行工作流。之后推送 `dist/` 或工作流文件的变更会自动部署。工作流仅发布 `dist/`，不会将整个代码仓库发布到网站。
 4. 部署成功后，在 Pages 设置或工作流的 `github-pages` 环境里打开实际网址。项目网址通常形如 `https://你的用户名.github.io/qnh-shelf-life/`，以 GitHub 返回的网址为准。
-5. 创建私有数据仓库，勾选添加 README，使 `main` 分支实际存在。应用首次连接空数据仓库后，第一次保存会创建 `data/shelf-life.json`，无需预先手工制作数据文件。
+5. 当前团队的私有数据仓库 `Wzz79229/bzq` 与 `main` 分支、`data/shelf-life.json` 已初始化。若迁移到其他新仓库，请先创建仓库并勾选添加 README，使 `main` 分支存在；首次连接时会创建尚不存在的数据文件。
 6. 在数据仓库的 **Settings → Collaborators** 或组织的成员/团队设置里邀请成员，并给予允许写入目标分支的权限。成员需要先接受邀请。
 
 GitHub Pages 的可用仓库类型与访问控制取决于账号计划。即使代码来自私有仓库，也不要默认认为 Pages 网站自动私有。参见 [GitHub Pages 入门](https://docs.github.com/en/pages/getting-started-with-github-pages/about-github-pages)与[自定义工作流部署](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)。
@@ -66,7 +66,7 @@ GitHub Pages 的可用仓库类型与访问控制取决于账号计划。即使�
 | 设置 | 示例 |
 | --- | --- |
 | 仓库所有者 | `your-github-name` 或组织名，不填网址 |
-| 数据仓库 | `qnh-shelf-life-data` |
+| 数据仓库 | `bzq` |
 | 分支 | `main`，必须已存在 |
 | 数据文件 | `data/shelf-life.json` |
 | 操作人 | 便于自己识别的姓名或昵称 |
