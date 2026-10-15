@@ -4,7 +4,7 @@ export const MAX_INPUT_BYTES = 10 * 1024 * 1024;
 export const MAX_DIMENSION = 1600;
 export const MAX_PREVIEW_BYTES = 300 * 1024;
 const ALLOWED_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif']);
-const OCR_TIMEOUT_MS = 180_000;
+const OCR_TIMEOUT_MS = 300_000;
 let busy = false;
 
 function abortError() { return new DOMException('已取消照片识别', 'AbortError'); }
@@ -185,7 +185,7 @@ function localWorker(signal) {
       checkAbort(signal);
       if (closed) return Promise.reject(new Error('识别已结束，请重新选择照片。'));
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => terminate(new Error('识别用时过长，请取消后靠近包装文字重拍，并确认网络可加载本机识别资源。')), OCR_TIMEOUT_MS);
+        const timer = setTimeout(() => terminate(new Error('识别资源加载或识别已超过 5 分钟，请检查网络后重试，并靠近清晰的包装文字拍摄。')), OCR_TIMEOUT_MS);
         pending = { resolve, reject, progress, timer };
         try { worker.postMessage({ type: 'recognize', blob }); } catch {
           terminate(new Error('这张照片无法读取，请重新拍摄。'));
@@ -218,8 +218,16 @@ export async function recognizePhotos(input, { onProgress, signal } = {}) {
       if (!engine) engine = localWorker(signal);
       const result = await engine.recognize(processed.blob, (message) => {
         const recognizing = message.status === 'recognizing text';
-        const fraction = recognizing ? 0.25 + 0.7 * (Number(message.progress) || 0) : 0.15;
-        emit((index + fraction) / files.length, recognizing ? '正在识别包装文字' : '正在准备本机识别', index + 1);
+        const amount = Math.max(0, Math.min(1, Number(message.progress) || 0));
+        const stages = {
+          'loading tesseract core': [0.03, 0.05, '正在加载识别引擎，首次使用可能需几分钟，可随时取消'],
+          'initializing tesseract': [0.08, 0.04, '正在启动本机识别引擎'],
+          'loading language traineddata': [0.12, 0.08, '正在加载中英文识别资源，首次使用可能需几分钟，可随时取消'],
+          'initializing api': [0.20, 0.05, '正在准备包装文字识别'],
+        };
+        const [start, span, status] = stages[message.status] || [0.15, 0, '正在准备本机识别'];
+        const fraction = recognizing ? 0.25 + 0.7 * amount : start + span * amount;
+        emit((index + fraction) / files.length, recognizing ? '正在识别包装文字' : status, index + 1);
       });
       photoTexts.push({ id: processed.preview.id, text: String(result.text || '').trim(), confidence: Number(result.confidence) || 0 });
       emit((index + 1) / files.length, '包装照片识别完成', index + 1);

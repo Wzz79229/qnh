@@ -14,7 +14,7 @@ self.onmessage = async ({ data }) => {
         corePath: new URL('./core/', self.location.href).href,
         langPath: new URL('./lang/', self.location.href).href,
         workerBlobURL: false, legacyCore: false, legacyLang: false,
-        gzip: false, cacheMethod: 'none',
+        gzip: true, cacheMethod: 'none',
         logger: ({ status, progress }) => self.postMessage({ type: 'progress', status, progress }),
       });
       await engine.setParameters({ tessedit_pageseg_mode: '11', preserve_interword_spaces: '1', user_defined_dpi: '300' });

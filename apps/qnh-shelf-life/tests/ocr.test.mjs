@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import {
   MAX_PHOTOS, MAX_INPUT_BYTES, MAX_DIMENSION, MAX_PREVIEW_BYTES,
   validatePhotos, fitDimensions, previewByteLength, preprocessPhoto, recognizePhotos,
@@ -140,6 +141,11 @@ test('vendored OCR versions, all CPU variants and fast language assets match rec
     assert.deepEqual([...bytes.subarray(0, 4)], [0, 97, 115, 109], `${variant} must be actual WebAssembly`);
   }
   for (const language of ['chi_sim', 'eng']) {
-    assert.ok(fs.statSync(new URL(`lang/${language}.traineddata`, root)).size > 1_000_000);
+    const original = fs.readFileSync(new URL(`lang/${language}.traineddata`, root));
+    const compressed = fs.readFileSync(new URL(`lang/${language}.traineddata.gz`, root));
+    assert.ok(original.length > 1_000_000);
+    assert.ok(compressed.length < original.length);
+    assert.deepEqual(gunzipSync(compressed), original, `${language} gzip must preserve the official model exactly`);
+    assert.deepEqual(gzipSync(original, { level: 9, mtime: 0 }), compressed, `${language} gzip must be deterministic`);
   }
 });

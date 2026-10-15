@@ -9,7 +9,9 @@
     "All worker/core/model URLs are explicitly same-origin; photos are not sent to an OCR service.",
     "Core variants cover non-SIMD, SIMD and relaxed SIMD; legacy engine is disabled.",
     "Language model persistence in IndexedDB is disabled; static assets can be cached by the app Service Worker.",
-    "Sources and hashes below document vendored assets; recognize.worker.js is application-owned adapter code."
+    "Sources and hashes below document vendored assets; recognize.worker.js is application-owned adapter code.",
+    "Language models are served as actual .traineddata.gz files and inflated inside the local worker; no HTTP Content-Encoding header is assumed.",
+    "The official .wasm.js cores embed their WASM binary, confirmed by successful initialization with zero fetch calls. Standalone .wasm files are retained as upstream artifacts but are not needed by this runtime."
   ],
   "files": [
     {
@@ -32,8 +34,8 @@
     },
     {
       "path": "recognize.worker.js",
-      "bytes": 1366,
-      "sha256": "c9fb623121a126785ac40eab94c0262e8652a72fa25114adf83dac837933260e",
+      "bytes": 1365,
+      "sha256": "987324b459a95e44d0a9406e0506c7f9bb5fa284c29d946f6ad0d217f100f016",
       "source": "Application code"
     },
     {
@@ -95,6 +97,20 @@
       "bytes": 4113088,
       "sha256": "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2",
       "source": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.1.0/eng.traineddata"
+    },
+    {
+      "path": "lang/chi_sim.traineddata.gz",
+      "bytes": 1722294,
+      "sha256": "6a317f84d100103a0740334e01c3dedbe761a29d946b44a166cb322729094bec",
+      "source": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.1.0/chi_sim.traineddata",
+      "transform": "Deterministic local gzip, level 9, mtime 0; Tesseract worker explicitly uses gzip:true."
+    },
+    {
+      "path": "lang/eng.traineddata.gz",
+      "bytes": 1962155,
+      "sha256": "b130d16b69e3888bc099133991a50a5b50e1da0e3ff6ca31a5496fab0fb386c3",
+      "source": "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/4.1.0/eng.traineddata",
+      "transform": "Deterministic local gzip, level 9, mtime 0; Tesseract worker explicitly uses gzip:true."
     }
   ]
 }
