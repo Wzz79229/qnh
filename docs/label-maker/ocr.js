@@ -1,9 +1,13 @@
 /** Browser-only OCR. Images stay in memory; only bundled OCR assets are loaded. */
+import { parseScreenshotText } from './label.js?v=20261015-3';
+
 const ASSET_ROOT = new URL('./vendor/tesseract/', import.meta.url);
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 const MAX_PIXELS = 40_000_000;
 const MAX_EDGE = 2400;
 const LOCATION_MAX_WIDTH = 960;
+const LOCATION_IMAGE_MAX_WIDTH = 1600;
+const LOCATION_IMAGE_MAX_EDGE = 4000;
 const WORKER_IDLE_MS = 120_000;
 const ACCEPTED_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 let runtimePromise;
@@ -81,7 +85,7 @@ function decodeImage(file, signal) {
   });
 }
 
-async function prepareImage(file, signal, wait, mode) {
+async function prepareImage(file, signal, wait, mode, wholeImage = false) {
   const image = await wait(decodeImage(file, signal));
   const width = image.naturalWidth;
   const height = image.naturalHeight;
@@ -91,10 +95,12 @@ async function prepareImage(file, signal, wait, mode) {
   }
   // QNH places the location near the top of a stock screenshot. The fast pass
   // leaves the original file intact so a failed/ambiguous pass can fall back.
-  const sourceHeight = mode === 'location' && height > width * 1.25
+  const sourceHeight = mode === 'location' && !wholeImage && height > width * 1.25
     ? Math.min(height, Math.max(width * 0.65, height * 0.34)) : height;
   const scale = mode === 'location'
-    ? Math.min(1, LOCATION_MAX_WIDTH / width)
+    ? wholeImage
+      ? Math.min(1, LOCATION_IMAGE_MAX_WIDTH / width, LOCATION_IMAGE_MAX_EDGE / Math.max(width, height))
+      : Math.min(1, LOCATION_MAX_WIDTH / width)
     : Math.min(1, MAX_EDGE / Math.max(width, height));
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(width * scale);
@@ -206,18 +212,30 @@ function fastLocation(text) {
 /**
  * @param {File|Blob} file PNG/JPEG/WebP, at most 15 MB.
  * @param {{onProgress?: (value: {status: string, progress: number}) => void,
- * signal?: AbortSignal, mode?: 'full'|'location'}} [options]
- * @returns {Promise<{text: string, mode: 'full'|'location'}>} Full OCR text or a
- * normalized, repeated location field; identifiers are never substituted.
+ * signal?: AbortSignal, mode?: 'full'|'location',
+ * product?: {sku?: string, name?: string, spec?: string}, targetSku?: string}} [options]
+ * @returns {Promise<{text: string, mode: 'full'|'location', scope?: 'image'}>}
+ * Full OCR text or a normalized, repeated location field; identifiers are never
+ * substituted. `scope: 'image'` means all visible cards were read, so the text
+ * may be reused when matching a different product in the same screenshot.
  */
-export async function recognizeScreenshot(file, { onProgress, signal, mode = 'full' } = {}) {
+export async function recognizeScreenshot(file, { onProgress, signal, mode = 'full', product, targetSku } = {}) {
   if (signal?.aborted) throw abortError();
   validateFile(file);
   if (activeJob) throw new Error('已有图片正在识别，请先取消或等待完成。');
   if (typeof Worker === 'undefined' || typeof WebAssembly === 'undefined') {
     throw new Error('当前浏览器不支持本地识别，请使用新版 Safari 或 Chrome。');
   }
-  const job = { worker: null, entry: null, stopped: false, completed: false, mode: mode === 'location' ? 'location' : 'full', stage: '准备图片' };
+  // A pasted product identifies which card matters. A crop near the top cannot
+  // establish that association: its location might belong to a different SKU.
+  // Read the complete screenshot and match the target SKU before accepting a
+  // location. An English pass can establish this without loading Chinese
+  // models; names alone still require the complete bilingual pass.
+  const hasTarget = [targetSku, product?.sku, product?.name]
+    .some(value => typeof value === 'string' && value.trim().length > 0);
+  const matchingProduct = { ...product, sku: typeof targetSku === 'string' && targetSku.trim() ? targetSku.trim() : product?.sku };
+  const targetedFastPass = mode === 'location' && typeof matchingProduct.sku === 'string' && /^\d{10,64}$/.test(matchingProduct.sku);
+  const job = { worker: null, entry: null, stopped: false, completed: false, mode: mode === 'location' && (!hasTarget || targetedFastPass) ? 'location' : 'full', stage: '准备图片' };
   activeJob = job;
   clearTimeout(idleTimer);
   let rejectStopped;
@@ -243,7 +261,7 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
   const timeout = setTimeout(() => stop(new Error('本地识别耗时过长，请裁剪截图后重试。')), 180_000);
   try {
     report('正在准备截图', 0.02);
-    let image = await prepareImage(file, signal, wait, job.mode);
+    let image = await prepareImage(file, signal, wait, job.mode, targetedFastPass);
     job.stage = '加载组件';
     report('正在加载本地识别组件，首次使用需要稍等', 0.08);
     const Tesseract = await wait(loadRuntime());
@@ -257,7 +275,18 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
     let result = await wait(job.worker.recognize(image, {}, { text: true }));
     if (job.stopped || signal?.aborted) throw abortError();
     if (job.mode === 'location') {
-      const location = fastLocation(result.data?.text);
+      if (targetedFastPass) {
+        const text = String(result.data?.text || '').replace(/\r\n?/g, '\n').trim();
+        const matched = parseScreenshotText(text, { product: matchingProduct });
+        // The parser requires a unique, sufficiently long visible SKU match;
+        // partial/missing card boundaries and contradictory data fall back.
+        if (!matched.matchError && matched.matchedBy === 'sku' && matched.loc) {
+          job.completed = true;
+          report('库位与 SKU 匹配完成，请核对', 1);
+          return { text, mode: 'full', scope: 'image' };
+        }
+      }
+      const location = targetedFastPass ? '' : fastLocation(result.data?.text);
       if (location) {
         job.completed = true;
         report('库位识别完成，请核对', 1);
@@ -281,12 +310,12 @@ export async function recognizeScreenshot(file, { onProgress, signal, mode = 'fu
     if (job.stopped || signal?.aborted) throw abortError();
     const text = String(result.data?.text || '').replace(/\r\n?/g, '\n').trim();
     if (!text) throw new Error('没有识别到文字，请裁剪到商品信息区域并使用清晰截图。');
-    if (mode === 'location' && new Set(locationCandidates(text)).size > 1) {
+    if (mode === 'location' && !hasTarget && new Set(locationCandidates(text)).size > 1) {
       throw new Error('截图中识别到多个不同库位，请裁剪到单个商品，或在整段文字中补充准确“库位：…”后重试。');
     }
     job.completed = true;
     report('识别完成，请核对名称、库位和编码', 1);
-    return { text, mode: 'full' };
+    return { text, mode: 'full', scope: 'image' };
   } catch (error) {
     if (error?.name === 'AbortError') throw error;
     // Deliberate validation errors are already user-readable Chinese.

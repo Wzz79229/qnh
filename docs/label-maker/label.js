@@ -247,8 +247,8 @@ function ocrControlLine(value) {
   return !value || /^(?:共\s*(?:找到|有).*?(?:条|个)|搜索\s*$|库存查询|商品库存\s*$|货品库存\s*$|返回\s*$|总\s*库\s*存|可用库存|锁定|长\s*宽\s*高|重\s*量\s*[:：]|设置长宽高|调整库存|调整库位|复制\s*$|\d+\s*张\s*$)/.test(value) || /^[\d\s:+*×%.\-]+$/.test(value);
 }
 
-/** Conservative extraction for a single QNH product-detail screenshot. */
-export function parseScreenshotText(text) {
+/** Conservative extraction for one QNH product card. */
+function parseSingleScreenshotText(text) {
   if (typeof text !== 'string') throw new Error('截图识别结果应为文字。');
   const result = {name: '', spec: '', sku: '', loc: '', upc: '', warnings: []};
   const lines = text.replace(/\u200b/g, '').split(/\r?\n|[；;]/).map(line => line.trim()).filter(Boolean);
@@ -326,6 +326,133 @@ export function parseScreenshotText(text) {
   }
   result.warnings = [...new Set(result.warnings)];
   return result;
+}
+
+function screenshotLocationLine(line) {
+  const labelled = line.match(/^库[ \t]*位(?:码|号)?[ \t]*[:：]?[ \t]*(.*)$/);
+  return normalizedLocation(labelled ? labelled[1] : line);
+}
+
+function screenshotCards(text) {
+  const lines = text.replace(/\u200b/g, '').split(/\r?\n|[；;]/).map(line => line.trim()).filter(Boolean);
+  const starts = [];
+  const badge = /^库[ \t]*位(?:码|号)?[ \t]*[:：]?/;
+  const hasBadges = lines.some((line, index) => badge.test(line) && (screenshotLocationLine(line) || normalizedLocation(lines[index + 1] || '')));
+  for (let index = 0; index < lines.length; index++) {
+    // A location typed in the search bar is not another product card.
+    if (hasBadges && !badge.test(lines[index])) continue;
+    let loc = screenshotLocationLine(lines[index]);
+    // OCR sometimes puts the blue 库位 badge and its code on separate lines.
+    if (!loc && /^库[ \t]*位(?:码|号)?[ \t]*[:：]?$/.test(lines[index])) loc = normalizedLocation(lines[index + 1] || '');
+    if (!loc) continue;
+    if (!hasBadges && !loc.includes('-')) continue;
+    if (starts.length && starts[starts.length - 1].loc === loc && starts[starts.length - 1].index === index - 1) continue;
+    starts.push({index, loc});
+  }
+  return starts.map((start, index) => {
+    const cardText = lines.slice(start.index, starts[index + 1]?.index ?? lines.length).join('\n');
+    const record = parseSingleScreenshotText(cardText);
+    record.loc = start.loc;
+    // This value is only evidence for selecting a card. It never fills a SKU.
+    const skuLine = cardText.match(/(?:^|\n)[ \t]*s[ \t]*k[ \t]*u(?:码|编号)?[ \t]*[:：]?[ \t]*(?:\n[ \t]*)?([^\n]+)/i);
+    const skuValue = skuLine ? skuLine[1].replace(/(?:复制|copy).*$/i, '').trim() : '';
+    const numericSku = skuValue.match(/^(\d[\d \t]*(?:(?:\.{2,}|…+|⋯+|。{2,})[ \t]*\d[\d \t]*)?)/);
+    // A missed/misread location can accidentally merge neighboring cards.
+    // Never associate the first SKU in that merged region with its first location.
+    const skuCount = [...cardText.matchAll(/(?:^|\n)[ \t]*s[ \t]*k[ \t]*u(?:码|编号)?[ \t]*[:：]?/gi)].length;
+    const upcCount = [...cardText.matchAll(/(?:^|\n)[ \t]*u[ \t]*p[ \t]*c(?:码)?[ \t]*[:：]?/gi)].length;
+    return {record, visibleSku: numericSku ? numericSku[1].replace(/[ \t]/g, '') : '', ambiguous: skuCount > 1 || upcCount > 1, text: cardText};
+  });
+}
+
+function visibleSkuMatches(visible, full) {
+  if (!/^\d+$/.test(full) || !visible) return false;
+  if (!INCOMPLETE_SKU.test(visible)) return visible === full;
+  const parts = visible.split(/\.{2,}|…+|⋯+|。{2,}/);
+  // Both independently visible ends are required; do not infer a missing ID.
+  return parts.length === 2 && parts.every(part => /^\d{3,}$/.test(part)) && parts[0].length + parts[1].length >= 10 &&
+    parts[0].length + parts[1].length < full.length && full.startsWith(parts[0]) && full.endsWith(parts[1]);
+}
+
+function comparableName(value) {
+  return String(value || '').normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+function nameSimilarity(left, right) {
+  const a = comparableName(left), b = comparableName(right);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (Math.min(a.length, b.length) >= 8 && (a.includes(b) || b.includes(a))) return 0.98;
+  const grams = value => new Set(Array.from({length: Math.max(0, value.length - 1)}, (_, index) => value.slice(index, index + 2)));
+  const aa = grams(a), bb = grams(b);
+  let shared = 0;
+  for (const value of aa) if (bb.has(value)) shared++;
+  return aa.size + bb.size ? 2 * shared / (aa.size + bb.size) : 0;
+}
+
+function readableComparableNames(target, detected) {
+  // The fast English pass cannot read Chinese names. Its ASCII noise is not
+  // contradictory product evidence when a long visible SKU already matches.
+  return Boolean(target && detected) && !(/[\p{Script=Han}]/u.test(target) && !/[\p{Script=Han}]/u.test(detected));
+}
+
+function unmatchedScreenshot(message) {
+  return {name: '', spec: '', sku: '', loc: '', upc: '', warnings: [message], matchError: message};
+}
+
+/** Match one card in a multi-product screenshot using the user's whole-text fields. */
+export function parseScreenshotText(text, {product = {}} = {}) {
+  if (typeof text !== 'string') throw new Error('截图识别结果应为文字。');
+  const cards = screenshotCards(text);
+  const targetSku = typeof product.sku === 'string' && validSku(product.sku) ? cleanIdentifier(product.sku) : '';
+  const targetName = typeof product.name === 'string' ? product.name : '';
+  if (cards.length < 2) {
+    if (cards[0]?.ambiguous) return unmatchedScreenshot('截图中的商品边界未能可靠识别，未选取库位。请换一张更清晰的截图，或裁剪到目标商品后重试。');
+    const record = cards[0]?.record || parseSingleScreenshotText(text);
+    const visible = cards[0]?.visibleSku || '';
+    if (targetSku && visible && !visibleSkuMatches(visible, targetSku)) {
+      return unmatchedScreenshot('截图中商品的可见 SKU 与文字不符，未选取库位。请核对完整 SKU 或更换截图。');
+    }
+    const skuMatches = targetSku && visibleSkuMatches(visible, targetSku);
+    if (targetName && record.name && (!skuMatches || readableComparableNames(targetName, record.name)) && nameSimilarity(targetName, record.name) < (skuMatches ? 0.55 : 0.90)) {
+      return unmatchedScreenshot('截图中商品名称与文字不一致，未选取库位。请核对商品文字或更换截图。');
+    }
+    if (skuMatches) record.matchedBy = 'sku';
+    else if (targetName && record.name && nameSimilarity(targetName, record.name) >= 0.90) record.matchedBy = 'name';
+    return record;
+  }
+  const scores = cards.map(card => card.ambiguous ? 0 : nameSimilarity(targetName, card.record.name));
+  const skuMatches = targetSku ? cards.map((card, index) => !card.ambiguous && visibleSkuMatches(card.visibleSku, targetSku) ? index : -1).filter(index => index >= 0) : [];
+  let selected = -1;
+  let method = '';
+  if (skuMatches.length === 1) {
+    selected = skuMatches[0];
+    // A contradictory name is evidence that OCR fields or the supplied text need correction.
+    const bestOther = Math.max(0, ...scores.filter((_, index) => index !== selected));
+    if (readableComparableNames(targetName, cards[selected].record.name) && (scores[selected] < 0.55 || bestOther > scores[selected] + 0.06)) {
+      return unmatchedScreenshot('截图中匹配 SKU 的商品名称与文字不一致，未选取库位。请核对商品文字，或换一张包含对应商品的截图。');
+    }
+    method = '完整 SKU';
+  } else if (skuMatches.length > 1) {
+    return unmatchedScreenshot('截图中有多个商品的可见 SKU 与文字相符，无法唯一确定库位。请裁剪到目标商品，或在整段文字中补充准确“库位：…”。');
+  } else if (targetName) {
+    const ranked = scores.map((score, index) => ({score, index})).sort((a, b) => b.score - a.score);
+    if (ranked[0].score >= 0.90 && ranked[0].score - ranked[1].score >= 0.08) {
+      selected = ranked[0].index;
+      const visible = cards[selected].visibleSku;
+      if (targetSku && visible && !visibleSkuMatches(visible, targetSku)) {
+        return unmatchedScreenshot('截图中同名商品的可见 SKU 与文字不符，未选取库位。请核对完整 SKU 或更换截图。');
+      }
+      method = '商品名称';
+    }
+  }
+  if (selected < 0) {
+    return unmatchedScreenshot('截图中有多个商品，未能按文字中的完整 SKU 或商品名称唯一匹配库位。请核对商品文字、裁剪到目标商品，或在整段文字中补充准确“库位：…”。');
+  }
+  const record = cards[selected].record;
+  record.matchedBy = method === '完整 SKU' ? 'sku' : 'name';
+  record.warnings.unshift(`已按${method}匹配到“${targetName || record.name || '对应商品'}”，库位为 ${record.loc}。`);
+  return record;
 }
 
 function comparableField(value) {

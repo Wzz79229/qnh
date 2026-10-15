@@ -1,4 +1,4 @@
-import {renderLabel,encodePng,parseProductText,parseScreenshotText,mergeProductSources} from './label.js';
+import {renderLabel,encodePng,parseProductText,parseScreenshotText,mergeProductSources} from './label.js?v=20261015-3';
 import {prepareLabelImage,saveLabelImage,shareLabelImage,capabilities,cleanup} from './save-image.js?v=20261015-2';
 
 const $=id=>document.getElementById(id);
@@ -77,7 +77,10 @@ $('product-text').addEventListener('paste',event=>{
   const file=[...(event.clipboardData?.files||[])].find(item=>item.type.startsWith('image/'));
   if(!file)return;
   event.preventDefault();const text=event.clipboardData.getData('text/plain');
-  if(text)$('product-text').setRangeText(text,$('product-text').selectionStart,$('product-text').selectionEnd,'end');
+  if(text){
+    $('product-text').setRangeText(text,$('product-text').selectionStart,$('product-text').selectionEnd,'end');
+    markDirty();
+  }
   attachImage(file);
 });
 for(const type of ['dragenter','dragover'])$('composer').addEventListener(type,event=>{event.preventDefault();$('composer').classList.add('dragging');});
@@ -119,26 +122,40 @@ $('product-form').addEventListener('submit',async event=>{
         recognitionMessage='文字信息已完整，直接生成标签。';
       }else{
         const mode=known.name&&known.sku&&known.spec?'location':'full';
+        const cacheKey=JSON.stringify([mode,known.sku||known.name,known.sku?'':known.spec]);
         const cache=recognitionCache.get(file);
-        if(cache?.has(mode)){
-          ocrText=cache.get(mode);recognitionMessage='已复用这张截图的识别结果，无需再次等待。';
+        let cachedText=cache?.get(cacheKey);
+        if(cachedText===undefined&&cache?.has('image-full')){
+          const imageText=cache.get('image-full');
+          // A previous English pass may not contain readable evidence for a
+          // different product. Retry OCR for that target instead of reusing a
+          // failed association; exact-context failures still remain cached.
+          const candidate=parseScreenshotText(imageText,{product:known});
+          if(!candidate.matchError&&(!(known.sku||known.name)||candidate.matchedBy))cachedText=imageText;
+        }
+        if(cachedText!==undefined){
+          ocrText=cachedText;recognitionMessage='已复用这张截图的识别结果，无需再次等待。';
         }else{
           $('progress-text').textContent=mode==='location'?'正在从截图读取库位…':'正在识别截图…';
           const started=performance.now();
-          const {recognizeScreenshot}=await import('./ocr.js?v=20261015-2');
-          const recognized=await recognizeScreenshot(file,{mode,signal,onProgress:info=>{if(expectedRevision!==revision)return;$('progress-text').textContent=info.status||'正在识别截图…';$('progress-bar').value=Math.min(1,Math.max(0,Number(info.progress)||0));}});
+          const {recognizeScreenshot}=await import('./ocr.js?v=20261015-3');
+          const recognized=await recognizeScreenshot(file,{mode,product:known,signal,onProgress:info=>{if(expectedRevision!==revision)return;$('progress-text').textContent=info.status||'正在识别截图…';$('progress-bar').value=Math.min(1,Math.max(0,Number(info.progress)||0));}});
           ocrText=recognized.text||'';
           if(!signal.aborted&&revision===expectedRevision){
-            const nextCache=cache||new Map();nextCache.set(mode,ocrText);recognitionCache.set(file,nextCache);
+            const nextCache=cache||new Map();nextCache.set(cacheKey,ocrText);
+            if(recognized.scope==='image')nextCache.set('image-full',ocrText);
+            recognitionCache.set(file,nextCache);
           }
           recognitionMessage=`图片识别用时 ${((performance.now()-started)/1000).toFixed(1)} 秒。`;
         }
       }
     }
     if(signal.aborted||revision!==expectedRevision)return;
-    const imageResult=ocrText?parseScreenshotText(ocrText):{};
+    const imageResult=ocrText?parseScreenshotText(ocrText,{product:known}):{};
     const record=mergeProductSources(textResult,imageResult);
     showSummary(record,ocrText);
+    if(imageResult.matchError&&!known.loc)throw Error(imageResult.matchError);
+    if(ocrText&&!known.loc&&(known.sku||known.name)&&!imageResult.matchedBy)throw Error('未能在截图中确认与文字对应的商品，未选取库位。请使用包含该商品名称和 SKU 的清晰截图。');
     const missing=['name','sku','loc'].filter(key=>!record[key]);
     if(missing.length)throw Error('还缺少'+missing.map(key=>fieldNames[key]).join('、')+'。请在上方整段文字中补充后重新生成，例如“SKU：完整编号；库位：C11-1-5”。');
     if(document.fonts?.ready)await document.fonts.ready;

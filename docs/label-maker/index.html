@@ -32,7 +32,7 @@
             <div class="composer-tools"><button id="add-image" type="button"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="1.5"/><path d="m3 17 6-6 4 4 3-3 5 5"/></svg>添加截图</button><span>也可粘贴或拖入图片</span><button id="clear-input" type="button">清空</button></div>
             <input id="image-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>
           </div>
-          <p class="field-hint" id="composer-hint">文字可以补充完整 SKU，截图可以提供库位。支持同时识别，也可只放其中一种。</p>
+          <p class="field-hint" id="composer-hint">文字提供完整 SKU，截图提供对应商品的库位。一张图有多个商品时，会按 SKU 和商品名称匹配。</p>
           <div id="recognition-progress" class="recognition-progress" hidden><div><span id="progress-text" role="status" aria-live="polite">正在识别…</span><button id="cancel-recognition" type="button">取消</button></div><progress id="progress-bar" max="1" value="0" aria-label="图片识别进度"></progress><small>首次需加载识别资源。文字信息越完整，图片识别越快。</small></div>
           <p id="form-error" class="form-error" role="alert" hidden></p>
           <button class="primary-button" id="generate" type="submit"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM8 10v4m3-4v4m2-4v4m3-4v4"/></svg><span>识别并生成标签</span><span aria-hidden="true">→</span></button>
@@ -69,6 +69,6 @@
       <p class="save-sheet-help">苹果手机可在系统菜单中选“存储图像”或“存储到文件”。若 App 内无法保存，请用 Safari 或手机浏览器打开本页。</p>
     </div>
   </section>
-  <script type="module" src="./app.js?v=20261015-2"></script>
+  <script type="module" src="./app.js?v=20261015-3"></script>
 </body>
 </html>
