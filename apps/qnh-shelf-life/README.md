@@ -6,9 +6,11 @@
 
 拍照和本机识别已实现；本机浏览器已用明确标注的合成包装测试图跑通识别流程。真实包装受印刷、反光、清晰度与标签格式影响，需要实际试拍；不完整或冲突的结果会要求补拍。
 
-**私有仓库的自动共享后台尚未部署、授权。** `dist/connection.json` 的 `apiBase` 为空时，网页明确显示尚未上传，照片草稿只留在当前打开的页面。刷新、关闭或手机回收页面会丢失未备份草稿。不能将聊天工具的 GitHub 授权复制给公开网页，也不能把后台密钥写进页面。
+**Cloudflare 同域 PWA 与后台已完成首次部署，尚未配置私有数据授权，也未完成团队共享验收。** 运行时目前只有 `ASSETS` 和 `ALLOWED_ORIGIN`，三个 Secret 尚未配置；浏览器访问 `/api/session` 已返回 `SETUP_REQUIRED`。部署成功不代表已连接 `bzq` 或已保存团队数据。
 
-网页入口：<https://wzz79229.github.io/qnh/shelf-life/>。
+Cloudflare 入口：[鲜期 App](https://qnh-shelf-life-api.w792294944.workers.dev/)。首次部署源码为 `main:b5a6096ad1dbb36952551b6b5b8c71c4ffbda553`，版本为 `ddf79631-81df-4273-86cf-7a84cd66e897`。
+
+原 [GitHub Pages 入口](https://wzz79229.github.io/qnh/shelf-life/) 仍保留空的连接配置。尚未连接时，照片草稿只留在当前打开的页面；刷新、关闭或手机回收页面会丢失未备份草稿。不能将聊天工具的 GitHub 授权复制给网页，也不能把后台密钥写进页面。
 
 ## 拍照使用
 
@@ -37,7 +39,7 @@
 
 `backend/` 提供固定读写 bzq 的 Cloudflare Worker，部署与 Secret 配置见 [backend/README.md](backend/README.md)。成员不需要 GitHub 令牌；后台独立保管一次管理员授权。
 
-推荐把 PWA 和 API 放在同一个 Worker 域名，避免手机第三方 Cookie 限制。部署后将该站点的 `dist/connection.json` 的 `apiBase` 设为实际 HTTPS 服务地址，再验证团队登录、保存及另一台手机读取。源码和业务数据继续在 GitHub，后台不另建业务数据库。
+Cloudflare 将 PWA 和 API 放在同一个 Worker 域名，避免手机第三方 Cookie 限制。Git Build 使用 `apps/qnh-shelf-life/backend` 为根目录，构建时仅将 Cloudflare 部署产物 `../dist/connection.json` 的 `apiBase` 改为 `/`；GitHub 源码及 Pages 的空连接配置不变。具体命令见后台说明。管理员配置 Secret 后，还需验收团队登录、照片保存及另一台手机读取。源码和业务数据继续在 GitHub，后台不另建业务数据库。
 
 没有配置后台就不声称已经自动连接。不要将 GitHub 令牌、团队密码或会话密钥发到聊天、放入前端文件或提交到 Git。
 
@@ -52,7 +54,7 @@ npm test
 
 本机预览 <http://127.0.0.1:4173>，只监听本机。测试涵盖日期、包装文字歧义、图片限制、后台会话、私有照片、数据版本冲突等；后端测试使用模拟请求，不能替代真实授权部署验收。
 
-首次拍照识别会按需读取约 27 MB 本地 OCR 资源。界面先缓存，OCR 资源使用后缓存；照片、业务接口响应和授权信息不进 Service Worker 缓存。苹果使用 Safari 分享菜单添加到主屏幕，安卓可在浏览器菜单安装或添加到桌面。
+首次拍照识别按设备能力只选一种内嵌 WASM 的 LSTM core，再读取简中、英文两个 gzip 语言文件及 worker 脚本，文件合计约 7.8 MB（约 8 MB，实际传输量受 HTTP 压缩影响）。其他 core 变体和独立 `.wasm` 是保留的上游资源，不会全部下载用于一次识别。界面先缓存，OCR 资源使用后缓存；照片、业务接口响应和授权信息不进 Service Worker 缓存。苹果使用 Safari 分享菜单添加到主屏幕，安卓可在浏览器菜单安装或添加到桌面。
 
 ## 维护与依赖
 

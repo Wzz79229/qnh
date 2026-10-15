@@ -2,6 +2,7 @@ name = "qnh-shelf-life-api"
 main = "worker.mjs"
 compatibility_date = "2026-10-15"
 workers_dev = true
+preview_urls = false
 
 [vars]
 ALLOWED_ORIGIN = "https://wzz79229.github.io"
