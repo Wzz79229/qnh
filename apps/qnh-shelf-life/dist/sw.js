@@ -1,11 +1,11 @@
 /* Cache only the published application shell. Business data and credentials never enter this cache. */
 const CACHE_PREFIX = 'xianqi-shell-';
-const CACHE_NAME = `${CACHE_PREFIX}v4-photo`;
+const CACHE_NAME = `${CACHE_PREFIX}v6-catalog`;
 const SHELL = [
   './', './index.html', './styles.css', './app.mjs', './core.mjs', './github.mjs',
   './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png',
   './icons/icon-512.png', './icons/maskable-512.png',
-  './cloud.mjs', './connection.json', './photo-flow.mjs', './photo-parser.mjs', './photo-sync.mjs', './ocr.mjs',
+  './cloud.mjs', './connection.json', './photo-flow.mjs', './photo-parser.mjs', './photo-sync.mjs', './ocr.mjs', './catalog.mjs',
 ];
 // OCR models are cached only after first use, rather than forcing a large initial install.
 const OCR = ['./vendor/tesseract/recognize.worker.js','./vendor/tesseract/tesseract.min.js','./vendor/tesseract/worker.min.js',
@@ -28,7 +28,7 @@ self.addEventListener('fetch', (event) => {
   const request = event.request;
   const url = new URL(request.url);
   // Only exact, same-origin static URLs belong to the cache. In particular,
-  // GitHub API requests, Authorization headers, and query strings bypass it.
+  // Catalog/photo API data, external product images, Authorization headers and queries bypass it.
   if (request.method !== 'GET' || url.origin !== self.location.origin ||
       request.headers.has('Authorization') || url.search || !shellURLs.has(url.href)) return;
 

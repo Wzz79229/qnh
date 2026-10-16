@@ -97,7 +97,7 @@ export class GitHubStore {
     this.#path = validated.path;
     this.#token = validated.token;
     if (typeof fetchImpl !== 'function') throw settingError('当前浏览器不支持网络请求，请使用新版手机浏览器。');
-    this.#fetch = fetchImpl;
+    this.#fetch = fetchImpl.bind(globalThis);
     this.#timeoutMs = config.timeoutMs ?? 20_000;
     if (!Number.isFinite(this.#timeoutMs) || this.#timeoutMs < 1 || this.#timeoutMs > 120_000) {
       throw settingError('网络超时设置无效。');

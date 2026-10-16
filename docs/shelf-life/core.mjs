@@ -209,6 +209,21 @@ export function validateRecord(input, { strict = false } = {}) {
       }
     }
   }
+  // Optional catalog association is a snapshot of identity and specification.
+  // Production and expiry dates remain batch-specific packaging evidence.
+  if (input.productSku !== undefined || input.productSpu !== undefined) {
+    for (const field of ['productSku', 'productSpu']) {
+      const value = input[field];
+      if (typeof value !== 'string' || !value.trim() || value.trim().length > 64
+          || /[\s\u0000-\u001f\u007f]/u.test(value.trim())) errors.push(`${field} 商品编号无效`);
+      else record[field] = value.trim();
+    }
+  }
+  if (input.spec !== undefined) {
+    if (typeof input.spec !== 'string' || input.spec.trim().length > 120
+        || /[\u0000-\u001f\u007f]/u.test(input.spec)) errors.push('商品规格无效');
+    else record.spec = input.spec.trim();
+  }
   for (const field of ['handledAt', 'updatedAt', 'deletedAt']) {
     const value = input[field];
     const absent = value == null || value === '';

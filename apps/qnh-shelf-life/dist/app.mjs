@@ -4,13 +4,14 @@ import { CloudStore } from './cloud.mjs';
 import { openPhotoFlow } from './photo-flow.mjs';
 import { previewByteLength } from './ocr.mjs';
 import { syncPhotoState } from './photo-sync.mjs';
+import { normalizeCatalog, searchProducts, matchBarcode, nameCandidates, CATALOG_MAX_PRODUCTS } from './catalog.mjs';
 
 const $ = (s, root = document) => root.querySelector(s);
 const e = (value = '') => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const icon = (name, extra = '') => `<svg class="icon ${extra}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
 const now = () => new Date().toISOString();
 const emptyState = () => ({ schemaVersion: 1, records: [], settings: {...DEFAULT_SETTINGS}, updatedAt: now() });
-const navItems = [['overview','grid','保质期总览','总览'],['batches','box','商品批次','批次'],['tasks','clock','临期处理','待办'],['team','users','团队与同步','团队']];
+const navItems = [['overview','grid','保质期总览','总览'],['catalog','catalog','牵牛花商品库','商品库'],['batches','box','商品批次','批次'],['tasks','clock','临期处理','待办'],['team','users','团队与同步','团队']];
 const labels = {expired:'已过期',today:'今日到期',urgent:'紧急临期',warning:'即将临期',normal:'保质期内',handled:'已处理',removed:'已移除'};
 let state = emptyState();
 let page = 'overview', filter = 'all', search = '', category = '', sort = 'expiry', limit = 60;
@@ -19,6 +20,102 @@ let installPrompt = null, toastTimer;
 let config = {owner:'Wzz79229',repo:'bzq',branch:'main',path:'data/shelf-life.json',actor:'团队成员'};
 let connectionIssue = '', needsLogin = false;
 const pendingPhotos = new Map();
+let catalog = null, catalogStatus = 'unloaded', catalogIssue = '', catalogProgress = '';
+let catalogQuery = '', catalogPage = 1, catalogRequest = 0, catalogPromise = null;
+let catalogSearchCache = null;
+const CATALOG_PAGE_SIZE = 24;
+
+function cancelCatalogLoad(clear = false) {
+  catalogRequest++; catalogPromise = null; catalogProgress = '';
+  if (clear) { catalog = null; catalogIssue = ''; catalogSearchCache = null; catalogPage = 1; }
+  catalogStatus = catalog ? 'ready' : 'unloaded';
+}
+function catalogTime(value) {
+  return new Intl.DateTimeFormat('zh-CN', {timeZone:'Asia/Shanghai',dateStyle:'medium',timeStyle:'short'}).format(new Date(value));
+}
+function productThumbnail(product, extra = '') {
+  return `<span class="catalog-thumb ${extra}">${icon('box')}${product.imageUrl?`<img data-catalog-image src="${e(product.imageUrl)}" alt="${e(product.name)}" loading="lazy" decoding="async" referrerpolicy="no-referrer">`:'<span class="catalog-image-label">暂无图片</span>'}</span>`;
+}
+async function loadCatalog({force = false, background = false} = {}) {
+  if (!connected || !store || demo) return null;
+  if (catalog && !force) return catalog;
+  if (catalogPromise && !force) return catalogPromise;
+  const currentStore = store, request = ++catalogRequest;
+  const active = () => request === catalogRequest && connected && store === currentStore && !demo;
+  const update = () => { if (active() && page === 'catalog' && !document.querySelector('dialog[open]')) render(true); };
+  catalogStatus = 'loading'; catalogIssue = ''; catalogProgress = '正在读取商品库索引…'; update();
+  const promise = (async () => {
+    try {
+      // Authorization is checked by the session flow before connected can be true.
+      const manifest = await currentStore.catalog();
+      if (!active()) return null;
+      if (manifest?.schemaVersion !== 1 || typeof manifest.generation !== 'string' || !manifest.generation || manifest.generation.length > 160
+          || !Array.isArray(manifest.pages) || manifest.pages.length > 100
+          || !Number.isSafeInteger(manifest.total) || manifest.total < 0 || manifest.total > CATALOG_MAX_PRODUCTS) throw new Error('商品库索引格式无效，请联系管理员重新同步。');
+      const source = normalizeCatalog({schemaVersion:1,source:manifest.source,products:[]}).source;
+      const seen = new Set(); let expected = 0;
+      for (const part of manifest.pages) {
+        if (!Number.isSafeInteger(part?.index) || part.index < 0 || part.index >= 100 || seen.has(part.index)
+            || !Number.isSafeInteger(part.count) || part.count < 0 || part.count > CATALOG_MAX_PRODUCTS) throw new Error('商品库分页索引无效，请联系管理员重新同步。');
+        seen.add(part.index); expected += part.count;
+      }
+      if (expected !== manifest.total) throw new Error('商品库索引数量不一致，请联系管理员重新同步。');
+      const products = [];
+      for (let i = 0; i < manifest.pages.length; i++) {
+        if (!active()) return null;
+        const part = manifest.pages[i]; catalogProgress = `正在读取商品库 ${i + 1} / ${manifest.pages.length} 页…`; update();
+        const response = await currentStore.catalogPage(part.index);
+        if (!active()) return null;
+        if (response?.generation !== manifest.generation || response.index !== part.index) throw new Error('商品库同步版本已变化，请重新加载，避免混用不同快照。');
+        const normalized = normalizeCatalog(response);
+        if (JSON.stringify(normalized.source) !== JSON.stringify(source) || normalized.products.length !== part.count) throw new Error('商品库分页来源或数量不一致，请重新加载。');
+        products.push(...normalized.products);
+      }
+      if (!active()) return null;
+      catalog = normalizeCatalog({schemaVersion:1,source,products});
+      catalogStatus = 'ready'; catalogIssue = ''; catalogProgress = ''; catalogPage = 1; catalogSearchCache = null;
+      update(); return catalog;
+    } catch (error) {
+      if (!active()) return null;
+      catalogStatus = 'error'; catalogIssue = error.message || '商品库读取失败，请稍后重试。'; catalogProgress = '';
+      update(); if (!background && page !== 'catalog') notify(catalogIssue, true); return null;
+    } finally { if (request === catalogRequest) catalogPromise = null; }
+  })();
+  catalogPromise = promise;
+  return promise;
+}
+function catalogMatches() {
+  if (!catalog) return [];
+  if (catalogSearchCache?.catalog === catalog && catalogSearchCache.query === catalogQuery) return catalogSearchCache.products;
+  const products = [];
+  // The pure lookup caps each candidate group at 200. Search every group to paginate all results.
+  for (let index = 0; index < catalog.products.length; index += 200) products.push(...searchProducts(catalog.products.slice(index,index+200),catalogQuery,{limit:200}));
+  catalogSearchCache = {catalog,query:catalogQuery,products}; return products;
+}
+function catalogHTML() {
+  let html = heading('牵牛花商品库','选择已同步商品，再拍包装上的生产日期和保质期。',`<button class="button" data-action="catalog-reload" ${!connected||demo||catalogStatus==='loading'?'disabled':''}>${icon('refresh')}重新加载</button>`,'CATALOG SNAPSHOT') + banners();
+  if (!connected || demo) return html + `<div class="empty"><span class="empty-icon">${icon('catalog')}</span><h3>商品库尚未加载</h3><p>${demo?'示例体验不读取真实商品库。退出示例并连接团队后可查看牵牛花快照。':'先连接团队，再读取私有仓库中的牵牛花商品快照。此处尚未读取商品数量。'}</p><button class="button primary" data-action="${demo?'exit-demo':'team'}">${demo?'退出示例':'连接团队'}</button></div>`;
+  if (catalogStatus === 'loading') html += `<div class="notice" role="status">${icon('refresh')}<p>${e(catalogProgress)}${catalog?'当前仍显示此前已加载的快照。':''}</p></div>`;
+  if (catalogIssue) html += `<div class="notice warning" role="alert">${icon('alert')}<p>${e(catalogIssue)}${catalog?' 当前仍显示此前已加载的快照。':' 商品库尚未加载，不代表没有商品。'}</p><button class="button small" data-action="catalog-reload">重试</button></div>`;
+  if (!catalog) return html + `<div class="empty"><span class="empty-icon">${icon('catalog')}</span><h3>${catalogStatus==='loading'?'正在加载商品库':'商品库尚未加载'}</h3><p>${catalogStatus==='loading'?'正在逐页核对同一份牵牛花快照，完成后显示商品。':'请重新加载，或联系管理员检查商品快照与团队连接。'}</p></div>`;
+  const source = catalog.source, matches = catalogMatches();
+  const pages = Math.max(1,Math.ceil(matches.length/CATALOG_PAGE_SIZE)); catalogPage = Math.min(Math.max(1,catalogPage),pages);
+  html += `<section class="catalog-source"><div><strong>牵牛花快照</strong><span>上次同步：${e(catalogTime(source.syncedAt))}</span>${source.scope?`<span>同步范围：${e(source.scope)}</span>`:''}</div><span class="catalog-completeness ${source.complete?'complete':'partial'}">${source.complete?'来源标记为完整快照':'仅已采集部分 · 尚未确认完整'}</span><p>当前加载 ${catalog.products.length} 个 SKU。此为同步时的商品资料，后续变动需再次同步；图片由美团图片源提供。</p></section><div class="toolbar catalog-toolbar"><label class="search-field">${icon('search')}<input id="catalog-search" type="search" maxlength="300" placeholder="搜索名称、规格、条码或 SKU" value="${e(catalogQuery)}" aria-label="搜索商品库"></label><span class="count-label">找到 ${matches.length} 个 SKU</span></div>`;
+  if (!matches.length) html += `<div class="empty"><span class="empty-icon">${icon('search')}</span><h3>${catalogQuery?'没有匹配的商品':'当前快照没有商品记录'}</h3><p>${catalogQuery?'试试完整条码、SKU 或较短的商品名称。':'这份已加载快照的商品列表为空；请核对同步范围。'}</p></div>`;
+  else html += `<div class="catalog-grid">${matches.slice((catalogPage-1)*CATALOG_PAGE_SIZE,catalogPage*CATALOG_PAGE_SIZE).map(product=>`<article class="catalog-card">${productThumbnail(product)}<div class="catalog-product"><h2>${e(product.name)}</h2><p>${e(product.spec||'未提供规格')}</p>${product.category?`<span>${e(product.category)}</span>`:''}<dl><dt>SKU</dt><dd>${e(product.sku)}</dd><dt>条码</dt><dd>${e(product.barcodes.join(' / ')||'未提供条码')}</dd></dl></div><button class="button soft" data-action="catalog-photo" data-sku="${e(product.sku)}">${icon('camera')}选择并拍照</button></article>`).join('')}</div>`;
+  if (matches.length) html += `<div class="catalog-pagination"><button class="button small" data-action="catalog-prev" ${catalogPage===1?'disabled':''}>上一页</button><span>第 ${catalogPage} / ${pages} 页 · 每页 ${CATALOG_PAGE_SIZE} 个</span><button class="button small" data-action="catalog-next" ${catalogPage===pages?'disabled':''}>下一页</button></div>`;
+  return html;
+}
+async function resolveCatalogProduct(parsed) {
+  if (!connected || demo) return {product:null,candidates:[],message:'商品库尚未加载，本次仅按包装照片建档。'};
+  const loaded = await loadCatalog({background:true});
+  if (!loaded) return {product:null,candidates:[],message:catalogIssue||'商品库尚未加载，本次无法自动关联。'};
+  const matched = matchBarcode(loaded,parsed.barcode);
+  if (matched.status === 'matched') return {product:matched.product,candidates:[],message:'已按包装条码唯一匹配商品，请核对图片和规格。'};
+  if (matched.status === 'ambiguous') return {product:null,candidates:matched.candidates.slice(0,20),message:'这个条码对应多个商品，请核对图片和规格后明确选择，系统不会自动关联。'};
+  const names = nameCandidates(loaded,parsed.name,{limit:20});
+  return {product:null,candidates:names.candidates,message:names.total?'以下仅为名称候选，请点击确认商品和规格；不会根据名称自动关联。':'未在当前快照中找到对应商品，可按包装照片保存，或从商品库明确选择后补拍。'};
+}
 
 
 function records() { return state.records.filter(r => !r.deletedAt); }
@@ -88,7 +185,7 @@ function filteredRecords() {
   if (page === 'tasks') list = list.filter(r=>r.status==='active'&&['expired','today','urgent','warning'].includes(type(r)));
   if(filter !== 'all' && filter !== 'removed') list = list.filter(r=>filter==='expired'?['expired','today'].includes(type(r)):type(r)===filter);
   const needle = search.trim().toLowerCase();
-  if(needle) list = list.filter(r=>[r.name,r.barcode,r.batchCode,r.location,r.note].some(v=>String(v||'').toLowerCase().includes(needle)));
+  if(needle) list = list.filter(r=>[r.name,r.spec,r.productSku,r.barcode,r.batchCode,r.location,r.note].some(v=>String(v||'').toLowerCase().includes(needle)));
   if(category) list = list.filter(r=>r.category===category);
   return list.sort((a,b)=>sort==='name'?a.name.localeCompare(b.name,'zh-CN'):sort==='updated'?b.updatedAt.localeCompare(a.updatedAt):a.expiryDate.localeCompare(b.expiryDate));
 }
@@ -113,11 +210,11 @@ function teamHTML() {
 }
 function render(preserveFocus=false) {
   let position,focus;
-  if(preserveFocus){const el=document.activeElement;if(el?.id==='search'){position=el.selectionStart;focus='search';}}
-  updateChrome(); $('#main').innerHTML = page==='overview'?overviewHTML():page==='team'?teamHTML():batchesHTML(page==='tasks');
-  if(focus){const el=$('#search');el.focus({preventScroll:true});try{el.setSelectionRange(position,position);}catch{}}
+  if(preserveFocus){const el=document.activeElement;if(['search','catalog-search'].includes(el?.id)){position=el.selectionStart;focus=el.id;}}
+  updateChrome(); $('#main').innerHTML = page==='overview'?overviewHTML():page==='team'?teamHTML():page==='catalog'?catalogHTML():batchesHTML(page==='tasks');
+  if(focus){const el=$(`#${focus}`);if(el){el.focus({preventScroll:true});try{el.setSelectionRange(position,position);}catch{}}}
 }
-function go(next) { page=next;filter='all';search='';category='';limit=60;render();window.scrollTo({top:0,behavior:'instant'}); }
+function go(next) { if(!navItems.some(item=>item[0]===next))return;if(page==='catalog'&&next!=='catalog'&&catalogStatus==='loading')cancelCatalogLoad();page=next;filter='all';search='';category='';limit=60;render();window.scrollTo({top:0,behavior:'instant'});if(next==='catalog'&&connected&&!demo)loadCatalog(); }
 function showDialog(id,html) { const dialog=$(id);dialog.innerHTML=html;dialog.showModal();return dialog; }
 function closeDialog(id) { $(id).close(); }
 function confirmAction(title,message,actionText='继续',danger=false) {
@@ -128,9 +225,11 @@ function confirmAction(title,message,actionText='继续',danger=false) {
     const onCancel=ev=>{ev.preventDefault();finish(false);};d.addEventListener('click',onClick);d.addEventListener('cancel',onCancel);
   });
 }
-function recordDialog(record=null) {
-  openPhotoFlow({existingRecord:record,canSync:connected,onSave:async({parsed,previews,existingRecord})=>{
-    const input={...existingRecord,name:parsed.name,barcode:parsed.barcode,productionDate:parsed.productionDate,shelfLife:parsed.shelfLife,shelfUnit:parsed.shelfUnit,expiryDate:parsed.expiryDate,quantity:1,unit:'批',updatedAt:now(),photoRefs:previews.map(p=>({id:p.id,path:`photos/${p.id}.jpg`}))};
+function recordDialog(record=null,selectedProduct=null) {
+  const linked=record?.productSku?(catalog?.products.find(product=>product.sku===record.productSku)||{sku:record.productSku,spu:record.productSpu||'',name:record.name,spec:record.spec||'',category:record.category||'',barcodes:record.barcode?[record.barcode]:[],imageUrl:''}):null;
+  openPhotoFlow({existingRecord:record,selectedProduct:selectedProduct||linked,canSync:connected,resolveProduct:resolveCatalogProduct,onSave:async({parsed,previews,existingRecord,selectedProduct:product})=>{
+    const input={...existingRecord,name:product?.name||parsed.name,spec:product?.spec||'',category:product?product.category:existingRecord?.category||'',...(product?{productSku:product.sku,productSpu:product.spu}:{}),barcode:parsed.barcode||(product?.barcodes.length===1?product.barcodes[0]:''),productionDate:parsed.productionDate,shelfLife:parsed.shelfLife,shelfUnit:parsed.shelfUnit,expiryDate:parsed.expiryDate,quantity:1,unit:'批',updatedAt:now(),photoRefs:previews.map(p=>({id:p.id,path:`photos/${p.id}.jpg`}))};
+    if(!product){delete input.productSku;delete input.productSpu;}
     const validated=validateRecord(input);if(!validated.valid)throw new Error(validated.errors.join('；'));
     const r=validated.record;
     if(!existingRecord&&records().some(v=>v.name===r.name&&v.productionDate===r.productionDate&&v.expiryDate===r.expiryDate)&&!await confirmAction('发现相似拍照批次','已有同名商品的相同生产日期与到期日。确认是另一个批次时再继续。','仍然保存'))return false;
@@ -140,7 +239,9 @@ function recordDialog(record=null) {
   }});
 }
 function viewRecord(r) {
-  const d=showDialog('#record-dialog',`<div class="dialog-heading"><div><h2>商品包装档案</h2><p>商品信息来自包装照片。</p></div><button class="icon-button" data-close="record-dialog" aria-label="关闭">×</button></div><div class="dialog-body"><div class="photo-result"><h3>${e(r.name)}</h3><dl><dt>生产日期</dt><dd>${e(r.productionDate||'未标明')}</dd><dt>保质期</dt><dd>${r.shelfLife?e(r.shelfLife)+' '+({day:'天',month:'个月',year:'年'}[r.shelfUnit]):'按标注到期日'}</dd><dt>到期日期</dt><dd>${e(r.expiryDate)}</dd><dt>当前状态</dt><dd>${labels[type(r)]}</dd></dl></div><div id="saved-photos" class="record-photos"></div><div class="form-actions"><button class="button danger" data-action="delete" data-id="${e(r.id)}">移除批次</button><button class="button soft" data-action="retake" data-id="${e(r.id)}">补拍重新识别</button><button class="button" data-close="record-dialog">关闭</button></div></div>`);
+  const linked=connected&&catalog?r.productSku&&catalog.products.find(product=>product.sku===r.productSku):null;
+  const productHTML=r.productSku?`<div class="selected-catalog-product">${linked?productThumbnail(linked):''}<div><strong>${e(r.name)}</strong><span>${e(r.spec||'未提供规格')}</span><small>已关联 SKU ${e(r.productSku)}</small></div></div>`:'';
+  const d=showDialog('#record-dialog',`<div class="dialog-heading"><div><h2>商品包装档案</h2><p>生产日期与到期信息来自包装照片。</p></div><button class="icon-button" data-close="record-dialog" aria-label="关闭">×</button></div><div class="dialog-body">${productHTML}<div class="photo-result"><h3>${e(r.name)}</h3><dl><dt>生产日期</dt><dd>${e(r.productionDate||'未标明')}</dd><dt>保质期</dt><dd>${r.shelfLife?e(r.shelfLife)+' '+({day:'天',month:'个月',year:'年'}[r.shelfUnit]):'按标注到期日'}</dd><dt>到期日期</dt><dd>${e(r.expiryDate)}</dd><dt>当前状态</dt><dd>${labels[type(r)]}</dd></dl></div><div id="saved-photos" class="record-photos"></div><div class="form-actions"><button class="button danger" data-action="delete" data-id="${e(r.id)}">移除批次</button><button class="button soft" data-action="retake" data-id="${e(r.id)}">补拍重新识别</button><button class="button" data-close="record-dialog">关闭</button></div></div>`);
   const urls=[];d.addEventListener('close',()=>urls.forEach(url=>URL.revokeObjectURL(url)),{once:true});
   for(const ref of r.photoRefs||[]){const img=document.createElement('img');img.alt='商品包装照片';$('#saved-photos',d).append(img);const pending=pendingPhotos.get(ref.id);if(pending)img.src=pending.dataUrl;else if(store&&connected)store.photo(ref.id).then(blob=>{if(!d.open)return;const url=URL.createObjectURL(blob);urls.push(url);img.src=url;}).catch(()=>{img.replaceWith(document.createTextNode('照片暂时无法读取，请稍后重试。'));});else img.replaceWith(document.createTextNode('连接团队后可查看已保存的包装照片。'));}
   if(!r.photoRefs?.length)$('#saved-photos',d).textContent='这是原有批次，没有包装照片，可补拍建立照片档案。';
@@ -168,7 +269,7 @@ async function refresh(silent=false,discard=false) {
   finally{busy=false;updateChrome();}
 }
 async function autoConnect(password) {
-  if(busy||demo)return;busy=true;updateChrome();
+  if(busy||demo)return;cancelCatalogLoad(true);busy=true;updateChrome();
   try {
     if(!store){const response=await fetch('./connection.json',{cache:'no-store'});if(!response.ok)throw new Error('无法读取团队连接设置。');const settings=await response.json();store=new CloudStore(settings.apiBase);}
     if(password)await store.login(password);
@@ -186,6 +287,7 @@ async function autoConnect(password) {
   }catch(error){if(error instanceof ConflictError){errorText=error.message;conflictDialog();}else connected=false;connectionIssue=error.message;needsLogin=error.code==='UNAUTHORIZED';if(page==='team')notify(error.message,true);}
   finally{busy=false;render();}
   if(connected&&dirty&&!errorText)await save('本页照片草稿已同步到团队');
+  if(connected&&page==='catalog')loadCatalog();
 }
 function download(text,name,mime='text/plain;charset=utf-8') { const url=URL.createObjectURL(new Blob([text],{type:mime}));const link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),20000); }
 function exportJSON() {download(JSON.stringify({...state,photoAttachments:[...pendingPhotos.values()]},null,2),`鲜期-照片草稿备份-${todayISO()}.json`,'application/json;charset=utf-8');notify('已导出记录与本页照片草稿');}
@@ -199,7 +301,7 @@ function restorePhotoBackup() {
       const wanted=new Set(backup.records.flatMap(r=>(r.photoRefs||[]).map(p=>p.id)));const restored=new Map();
       for(const p of attachments){const size=previewByteLength(p?.dataUrl);if(!p||!wanted.has(p.id)||restored.has(p.id)||size===null||size>300*1024||!p.dataUrl.startsWith('data:image/jpeg;base64,/9j/'))throw new Error('备份中的照片不完整或格式无效。');restored.set(p.id,{id:p.id,dataUrl:p.dataUrl,width:p.width,height:p.height});}
       if(!await confirmAction('恢复为本页照片草稿','将替换本页记录与未上传照片，不会立即覆盖团队。请先备份当前草稿，恢复后再连接团队核对同步。','恢复草稿'))return;
-      state=backup;pendingPhotos.clear();for(const [id,p] of restored)pendingPhotos.set(id,p);dirty=true;sha=null;connected=false;demo=false;errorText='';connectionIssue='照片备份已恢复为本页草稿，请连接团队后核对同步。';render();notify('已恢复照片草稿，尚未上传');
+      cancelCatalogLoad(true);state=backup;pendingPhotos.clear();for(const [id,p] of restored)pendingPhotos.set(id,p);dirty=true;sha=null;connected=false;demo=false;errorText='';connectionIssue='照片备份已恢复为本页草稿，请连接团队后核对同步。';render();notify('已恢复照片草稿，尚未上传');
     }catch(error){notify(error.message,true);}
   };input.click();
 }
@@ -219,7 +321,7 @@ function demoState() {
 }
 async function demoStart() {
   if((connected||dirty)&&!await confirmAction('进入示例体验','示例数据与团队数据分别管理。进入后将替换本页显示，请先保存或备份当前草稿。','进入示例'))return;
-  store=null;connected=false;sha=null;demo=true;dirty=false;errorText='';pendingPhotos.clear();state=demoState();go('overview');notify('正在体验示例数据');
+  cancelCatalogLoad(true);store=null;connected=false;sha=null;demo=true;dirty=false;errorText='';pendingPhotos.clear();state=demoState();go('overview');notify('正在体验示例数据');
 }
 async function install() {
   if(installPrompt){await installPrompt.prompt();await installPrompt.userChoice;installPrompt=null;return;}
@@ -234,6 +336,10 @@ document.addEventListener('click',async ev=>{
   if(busy&&!['export-json','export-csv','export-xlsx','team','install'].includes(action)){notify('正在同步，请稍候');return;}
   const r=state.records.find(item=>item.id===b.dataset.id);
   if(action==='add')recordDialog();
+  else if(action==='catalog-reload')loadCatalog({force:true});
+  else if(action==='catalog-photo'){const product=connected&&catalog?.products.find(item=>item.sku===b.dataset.sku);if(product)recordDialog(null,product);}
+  else if(action==='catalog-prev'){catalogPage=Math.max(1,catalogPage-1);render();$('#catalog-search')?.scrollIntoView({block:'start'});}
+  else if(action==='catalog-next'){catalogPage++;render();$('#catalog-search')?.scrollIntoView({block:'start'});}
   else if(action==='edit'&&r)viewRecord(r);
   else if(action==='retake'&&r){const d=$('#record-dialog');d.addEventListener('close',()=>recordDialog(r),{once:true});d.close();}
   else if(action==='filter'){go('batches');filter=b.dataset.filter;render();}
@@ -248,18 +354,19 @@ document.addEventListener('click',async ev=>{
   else if(action==='restore-deleted'&&r){r.deletedAt='';r.updatedAt=now();await changed('已恢复批次记录');}
   else if(action==='sync')save();
   else if(action==='refresh')refresh();
-  else if(action==='disconnect'){if(dirty&&!await confirmAction('退出团队','本页有未同步照片，请先备份。退出后将清除本页记录与照片草稿。','退出团队'))return;try{await store?.logout();}catch(error){notify(error.message,true);return;}store=null;connected=false;sha=null;state=emptyState();pendingPhotos.clear();dirty=false;errorText='';needsLogin=true;render();notify('已退出团队');}
+  else if(action==='disconnect'){if(dirty&&!await confirmAction('退出团队','本页有未同步照片，请先备份。退出后将清除本页记录与照片草稿。','退出团队'))return;try{await store?.logout();}catch(error){notify(error.message,true);return;}cancelCatalogLoad(true);store=null;connected=false;sha=null;state=emptyState();pendingPhotos.clear();dirty=false;errorText='';needsLogin=true;render();notify('已退出团队');}
   else if(action==='export-json')exportJSON();
   else if(action==='restore-backup')restorePhotoBackup();
   else if(action==='export-csv')exportSpreadsheet();
   else if(action==='export-xlsx')exportSpreadsheet(true);
   else if(action==='resolve-conflict'){exportJSON();closeDialog('#conflict-dialog');await refresh(false,true);}
   else if(action==='demo')demoStart();
-  else if(action==='exit-demo'){demo=false;dirty=false;pendingPhotos.clear();state=emptyState();errorText='';go('overview');autoConnect();}
+  else if(action==='exit-demo'){cancelCatalogLoad(true);demo=false;dirty=false;pendingPhotos.clear();state=emptyState();errorText='';go('overview');autoConnect();}
   else if(action==='load-more'){limit+=60;render();}
   else if(action==='install')install();
 });
-document.addEventListener('input',ev=>{if(ev.target.id==='search'){search=ev.target.value;limit=60;render(true);}});
+document.addEventListener('input',ev=>{if(ev.target.id==='search'){search=ev.target.value;limit=60;render(true);}else if(ev.target.id==='catalog-search'){catalogQuery=ev.target.value.replace(/[\u0000-\u001f\u007f]/g,'');catalogPage=1;render(true);}});
+document.addEventListener('error',ev=>{const img=ev.target;if(img instanceof HTMLImageElement&&img.matches('[data-catalog-image]')){img.hidden=true;img.parentElement.classList.add('image-failed');img.parentElement.setAttribute('title','图片暂时无法加载');}},true);
 document.addEventListener('change',ev=>{if(ev.target.id==='category-filter'){category=ev.target.value;limit=60;render();}else if(ev.target.id==='sort-select'){sort=ev.target.value;render();}});
 document.addEventListener('submit',async ev=>{
   if(ev.target.id==='team-login-form'){ev.preventDefault();await autoConnect(new FormData(ev.target).get('password'));}
