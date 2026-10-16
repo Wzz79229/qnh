@@ -49,6 +49,10 @@ Cloudflare 入口：[鲜期 App](https://qnh-shelf-life-api.w792294944.workers.d
 
 ## 管理员一次配置
 
+`connector/` 新增独立的管理员云端浏览器连接测试工具，要求 Cloudflare Access 验证管理员身份。当前只有源码和模拟测试，尚未部署，也未验证牵牛花云端登录；它不会保存密码或登录凭据，不向团队成员提供登录窗口。连接测试不代表商品图片同步完成。
+
+`backend/catalog-publish.mjs` 提供商品快照的分片和原子发布能力，通过 GitHub `expectedHeadOid` 检查版本。只写私有 `bzq` 的商品库文件，保留批次和照片；发布结果不确定时不会自动重试。当前尚未挂接同步接口。
+
 `backend/` 提供固定读写 bzq 的 Cloudflare Worker，部署与 Secret 配置见 [backend/README.md](backend/README.md)。成员不需要 GitHub 令牌；后台独立保管一次管理员授权。
 
 Cloudflare 将 PWA 和 API 放在同一个 Worker 域名，避免手机第三方 Cookie 限制。Git Build 使用 `apps/qnh-shelf-life/backend` 为根目录，构建时仅将 Cloudflare 部署产物 `../dist/connection.json` 的 `apiBase` 改为 `/`；GitHub 源码及 Pages 的空连接配置不变。具体命令见后台说明。管理员配置 Secret 后，还需验收团队登录、照片保存及另一台手机读取。源码和业务数据继续在 GitHub，后台不另建业务数据库。

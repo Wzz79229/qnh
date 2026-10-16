@@ -1,0 +1,22 @@
+name = "qnh-connector"
+main = "worker.mjs"
+compatibility_date = "2026-10-16"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+preview_urls = false
+
+[browser]
+binding = "BROWSER"
+
+[[durable_objects.bindings]]
+name = "CONNECTOR_SESSIONS"
+class_name = "QnhConnectorSession"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["QnhConnectorSession"]
+
+# Exact additional Meituan hosts only, after verifying the login page dependencies.
+# No wildcards, credentials, arbitrary URLs, or secrets belong here.
+# [vars]
+# QNH_ALLOWED_HOSTS = "verified-login-host.meituan.com"
