@@ -388,7 +388,7 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
         if (!supported.includes(request.method)) throw new ApiError(405, 'METHOD_NOT_ALLOWED', '不支持此请求方式。', { Allow: supported.join(', ') });
         const active = await authorized(request, env);
         if (url.pathname === '/api/session') {
-          if (!qnhLoginRequired(env)) return json(request, { configured: true, authorized: active });
+          if (!qnhLoginRequired(env)) return json(request, { configured: true, authorized: active, loginMethod: 'legacy' });
           const appMode = validateGitHubAuthorization(env).mode === 'app';
           const readiness = appMode ? await githubAppReady(env) : null;
           if (readiness && !readiness.ready) {
@@ -398,7 +398,7 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
               message: 'GitHub 仓库授权验证未通过，请管理员检查 App 安装范围、权限和私钥。' }, 503, { 'Retry-After': '30' });
           }
           return json(request, { configured: true, authorized: false, loginMethod: 'qnh_pending',
-            ...(appMode ? { githubAuthorization: 'ready' } : {}), message: '牵牛花员工手机登录尚未接通，请由管理员取得官方登录授权接口。' });
+            ...(appMode ? { githubAuthorization: 'ready' } : {}), message: '牵牛花手机登录连接尚未接通，暂不能进入保质期管理。' });
         }
         if (url.pathname === '/api/login') {
           if (qnhLoginRequired(env)) throw new ApiError(503, 'QNH_LOGIN_NOT_CONNECTED', '牵牛花员工手机登录尚未接通，当前不能使用团队口令代替登录。');

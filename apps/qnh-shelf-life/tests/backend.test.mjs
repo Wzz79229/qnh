@@ -67,7 +67,7 @@ test('missing or invalid administrator configuration fails closed without a GitH
 
 test('session status exposes only configured and authorized; unauthenticated data and photos are denied', async () => {
   const h = harness();
-  assert.deepEqual(await (await h.request('/api/session')).json(), { configured: true, authorized: false });
+  assert.deepEqual(await (await h.request('/api/session')).json(), { configured: true, authorized: false, loginMethod: 'legacy' });
   for (const path of ['/api/state', `/api/photos/${ID}`]) {
     const response = await h.request(path);
     assert.equal(response.status, 401);
@@ -94,7 +94,7 @@ test('valid sessions read the fixed private data and sanitize unknown fields', a
   const data = { ...state(), token: 'untrusted-extra' };
   const h = harness(reply(200, file(data)));
   const cookie = await h.login();
-  assert.deepEqual(await (await h.request('/api/session', { cookie })).json(), { configured: true, authorized: true });
+  assert.deepEqual(await (await h.request('/api/session', { cookie })).json(), { configured: true, authorized: true, loginMethod: 'legacy' });
   const response = await h.request('/api/state', { cookie });
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { data: state(), sha: OLD });

@@ -551,10 +551,10 @@ test('App readiness does not let a legacy cookie or password stand in for QNH em
 test('legacy App sessions and QNH PAT sessions keep their previous behavior without readiness probes', async () => {
   const f = readinessFixture();
   const legacyEnv = { ...f.environment, MEMBER_AUTH_MODE: 'legacy', TEAM_PASSWORD: 'synthetic-legacy-password', SESSION_SECRET: 'synthetic-legacy-session-secret-0123456789' };
-  assert.deepEqual(await (await f.request('session', {}, legacyEnv)).json(), { configured: true, authorized: false });
+  assert.deepEqual(await (await f.request('session', {}, legacyEnv)).json(), { configured: true, authorized: false, loginMethod: 'legacy' });
   const login = await f.request('login', { method: 'POST', body: JSON.stringify({ password: legacyEnv.TEAM_PASSWORD }) }, legacyEnv);
   const oldCookie = login.headers.get('Set-Cookie').split(';')[0];
-  assert.deepEqual(await (await f.request('session', { headers: { Cookie: oldCookie } }, legacyEnv)).json(), { configured: true, authorized: true });
+  assert.deepEqual(await (await f.request('session', { headers: { Cookie: oldCookie } }, legacyEnv)).json(), { configured: true, authorized: true, loginMethod: 'legacy' });
   const patEnv = { GITHUB_TOKEN: 'synthetic_pat', MEMBER_AUTH_MODE: 'qnh', ALLOWED_ORIGIN: ORIGIN };
   const body = await (await f.request('session', {}, patEnv)).json();
   assertPendingIdentity(body, undefined);

@@ -19,5 +19,5 @@ run_worker_first = ["/api/*"]
 
 # GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY are runtime
 # settings. QNH_CONNECTOR_KEY is only for the local bridge. Never put values here.
-# QNH employee identity is not implemented yet: qnh mode remains closed until
-# an official verifiable identity integration is supplied. No team-password bypass.
+# QNH phone-session verification is not connected yet. Keep qnh mode closed until
+# this phone's live product access and intended tenant are verified by the server.
