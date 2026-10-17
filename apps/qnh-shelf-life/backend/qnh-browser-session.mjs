@@ -26,6 +26,18 @@ const notConfigured = () => failure(503, 'QNH_BROWSER_NOT_CONFIGURED', '牵牛�
 const invalidInput = () => failure(400, 'INVALID_QNH_BROWSER_INPUT', '登录操作格式无效。');
 const closed = () => failure(401, 'QNH_BROWSER_SESSION_EXPIRED', '牵牛花登录会话已结束，请重新登录。');
 const unavailable = () => failure(502, 'QNH_BROWSER_UNAVAILABLE', '牵牛花连接暂时不可用，请重新登录。');
+function providerLimit(source) {
+  const error = failure(429, 'QNH_BROWSER_PROVIDER_LIMIT', '云端浏览器服务额度或频率受限，请管理员检查 Cloudflare 用量。');
+  let retry;
+  try { retry = source?.headers?.get?.('Retry-After'); } catch { /* Never inspect provider error text. */ }
+  if (typeof retry === 'string' && /^\d{1,5}$/u.test(retry) && Number(retry) > 0 && Number(retry) <= 86_400) error.retryAfter = Number(retry);
+  if (source instanceof QnhBrowserError && Number.isInteger(source.retryAfter)
+    && source.retryAfter > 0 && source.retryAfter <= 86_400) error.retryAfter = source.retryAfter;
+  return error;
+}
+function hasProviderLimitStatus(error) {
+  try { return error?.status === 429 || error?.statusCode === 429; } catch { return false; }
+}
 const browserDiagnostic = (phase, code) => console.warn('QNH_BROWSER_DIAGNOSTIC', phase, code);
 const CDP_DIAGNOSTIC_METHODS = new Set(['Page.enable', 'Runtime.enable', 'Network.enable', 'Network.setCacheDisabled',
   'Network.setBypassServiceWorker', 'Network.getResponseBody', 'Emulation.setDeviceMetricsOverride', 'Runtime.evaluate',
@@ -33,7 +45,7 @@ const CDP_DIAGNOSTIC_METHODS = new Set(['Page.enable', 'Runtime.enable', 'Networ
 const diagnosticMethod = method => CDP_DIAGNOSTIC_METHODS.has(method) ? method : 'UNKNOWN_CDP_METHOD';
 const diagnosticErrorCode = error => error instanceof QnhBrowserError
   && ['QNH_BROWSER_NOT_CONFIGURED', 'QNH_BROWSER_UNAVAILABLE', 'QNH_BROWSER_SESSION_EXPIRED',
-    'QNH_BROWSER_DEMO_LIMIT', 'QNH_BROWSER_START_RATE'].includes(error.code)
+    'QNH_BROWSER_BUSY', 'QNH_BROWSER_PROVIDER_LIMIT', 'QNH_BROWSER_START_RATE'].includes(error.code)
   ? error.code : 'PROVIDER_FAILURE';
 
 export function createQnhPhoneCookie(cryptoImpl = globalThis.crypto) {
@@ -435,6 +447,7 @@ export function createCloudflareQnhBrowserFactory(binding, { expectedTenantId, r
       const connection = await binding.connectSession(browserSessionId, { targetId: target.id });
       phase = 'OPEN_SOCKET';
       const response = await connection.webSocket.fetch('https://browser-binding.invalid', { headers: { Upgrade: 'websocket' } });
+      if (response.status === 429) throw providerLimit(response);
       if (!response.webSocket) throw unavailable();
       response.webSocket.accept(); cdp = createPrivateCdp(response.webSocket, diagnostic);
       phase = 'CDP_SETUP';
@@ -551,11 +564,12 @@ export function createCloudflareQnhBrowserFactory(binding, { expectedTenantId, r
           await binding.closeSession(browserSessionId);
         },
       };
-    } catch {
-      diagnostic(phase, 'FACTORY_UNAVAILABLE');
+    } catch (error) {
+      const mapped = hasProviderLimitStatus(error) ? providerLimit(error) : unavailable();
+      diagnostic(phase, mapped.code === 'QNH_BROWSER_PROVIDER_LIMIT' ? 'PROVIDER_LIMIT' : 'FACTORY_UNAVAILABLE');
       cdp?.close();
       if (browserSessionId) try { await binding.closeSession(browserSessionId); } catch { /* Safe generic failure only. */ }
-      throw unavailable();
+      throw mapped;
     }
   };
 }

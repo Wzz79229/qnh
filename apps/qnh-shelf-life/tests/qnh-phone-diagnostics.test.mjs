@@ -5,7 +5,7 @@ import { createCloudflareQnhBrowserFactory, ManagedQnhPhoneSession } from '../ba
 const PRIVATE_TEXT = 'PRIVATE password=synthetic-secret wss://provider.invalid/?jwt=synthetic-credential';
 const JPEG = Uint8Array.from([0xff, 0xd8, 1, 2, 0xff, 0xd9]);
 
-function setup({ method, mode, acquireFailure = false } = {}) {
+function setup({ method, mode, acquireFailure = false, acquireError, openSocketStatus } = {}) {
   const diagnostics = [];
   const diagnostic = (phase, code) => diagnostics.push([phase, code]);
   let closes = 0;
@@ -28,9 +28,11 @@ function setup({ method, mode, acquireFailure = false } = {}) {
     });
   };
   const binding = {
-    async acquire() { if (acquireFailure) throw new Error(PRIVATE_TEXT); return { sessionId: 'synthetic-private-browser' }; },
+    async acquire() { if (acquireError) throw acquireError; if (acquireFailure) throw new Error(PRIVATE_TEXT); return { sessionId: 'synthetic-private-browser' }; },
     devtools: { async newTarget() { return { id: 'synthetic-private-target' }; } },
-    async connectSession() { return { webSocket: { async fetch() { return { webSocket: socket }; } } }; },
+    async connectSession() { return { webSocket: { async fetch() {
+      return openSocketStatus ? { status: openSocketStatus, headers: new Headers({ 'Retry-After': '31' }) } : { webSocket: socket };
+    } } }; },
     async closeSession() { closes++; },
   };
   const factory = createCloudflareQnhBrowserFactory(binding, { expectedTenantId: '1012619', allowedDomains: ['qnh.meituan.com'],
@@ -74,4 +76,27 @@ test('provider acquisition errors reveal only the fixed factory stage and safe m
   await assert.rejects(h.controller.start(), error => error.code === 'QNH_BROWSER_UNAVAILABLE');
   assert.deepEqual(h.diagnostics, [['ACQUIRE', 'FACTORY_UNAVAILABLE'], ['MANAGED_START', 'QNH_BROWSER_UNAVAILABLE']]);
   assert.equal(h.closes, 0);
+});
+
+test('only known numeric provider 429 status is classified as an external service limit', async () => {
+  for (const key of ['status', 'statusCode']) {
+    const error = Object.assign(new Error(PRIVATE_TEXT), { [key]: 429, headers: new Headers({ 'Retry-After': '42' }) });
+    const h = setup({ acquireError: error });
+    await assert.rejects(h.controller.start(), result => result.code === 'QNH_BROWSER_PROVIDER_LIMIT'
+      && result.status === 429 && result.retryAfter === 42 && !result.message.includes('PRIVATE'));
+    assert.deepEqual(h.diagnostics, [['ACQUIRE', 'PROVIDER_LIMIT'], ['MANAGED_START', 'QNH_BROWSER_PROVIDER_LIMIT']]);
+  }
+  for (const error of [new Error('code: 429 Browser time limit exceeded for today PRIVATE'),
+    Object.assign(new Error(PRIVATE_TEXT), { status: '429' }), Object.assign(new Error(PRIVATE_TEXT), { status: 403 }),
+    Object.assign(new Error(PRIVATE_TEXT), { status: 500 })]) {
+    const h = setup({ acquireError: error });
+    await assert.rejects(h.controller.start(), result => result.code === 'QNH_BROWSER_UNAVAILABLE' && result.status === 502);
+  }
+});
+
+test('an upstream 429 websocket handshake is a provider limit and the allocated browser is closed', async () => {
+  const h = setup({ openSocketStatus: 429 });
+  await assert.rejects(h.controller.start(), error => error.code === 'QNH_BROWSER_PROVIDER_LIMIT' && error.retryAfter === 31);
+  assert.equal(h.closes, 1);
+  assert.deepEqual(h.diagnostics, [['OPEN_SOCKET', 'PROVIDER_LIMIT'], ['MANAGED_START', 'QNH_BROWSER_PROVIDER_LIMIT']]);
 });

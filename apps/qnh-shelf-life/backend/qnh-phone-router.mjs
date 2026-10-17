@@ -17,10 +17,10 @@ const ownObject = value => value !== null && typeof value === 'object' && !Array
 const exactKeys = (value, expected) => ownObject(value) && Object.keys(value).length === expected.length
   && Object.keys(value).every(key => expected.includes(key));
 
-/** A deliberately bounded demonstration allowance, not capacity for a store's normal trading day. */
-export const QNH_PHONE_DEMO_LIMITS = Object.freeze({
-  dailyMs: 480_000, reservationMs: 240_000, cleanupMs: 15_000,
-  concurrent: 2, newStartIntervalMs: 21_000, perIpAttempts: 2,
+/** Session cleanup, concurrency and start-rate protection; there is no application daily quota. */
+export const QNH_PHONE_SESSION_LIMITS = Object.freeze({
+  reservationMs: 240_000, cleanupMs: 15_000,
+  concurrent: 2, newStartIntervalMs: 21_000,
 });
 
 const fail = (status, code, message) => new QnhBrowserError(status, code, message);
@@ -113,14 +113,16 @@ async function unwrap(response) {
   if (!response.ok) {
     const safeCodes = new Set(['QNH_BROWSER_SESSION_EXPIRED', 'QNH_BROWSER_LOGIN_REQUIRED', 'QNH_BROWSER_INPUT_FROZEN',
       'QNH_BROWSER_FRAME_RATE', 'QNH_BROWSER_INPUT_RATE', 'QNH_BROWSER_NOT_CONFIGURED', 'QNH_BROWSER_UNAVAILABLE',
-      'INVALID_QNH_BROWSER_INPUT', 'QNH_BROWSER_DEMO_LIMIT', 'QNH_BROWSER_START_RATE']);
+      'INVALID_QNH_BROWSER_INPUT', 'QNH_BROWSER_BUSY', 'QNH_BROWSER_PROVIDER_LIMIT', 'QNH_BROWSER_START_RATE']);
     if (!safeCodes.has(value.code)) throw unavailable();
     const messages = {
       QNH_BROWSER_SESSION_EXPIRED: '牵牛花登录会话已结束，请重新登录。', QNH_BROWSER_LOGIN_REQUIRED: '请先登录牵牛花。',
       QNH_BROWSER_INPUT_FROZEN: '正在确认登录，请稍候。', QNH_BROWSER_FRAME_RATE: '请稍候再刷新登录画面。',
       QNH_BROWSER_INPUT_RATE: '登录操作过于频繁，请稍候重试。', QNH_BROWSER_NOT_CONFIGURED: '牵牛花手机登录连接尚未配置完成。',
       QNH_BROWSER_UNAVAILABLE: '牵牛花连接暂时不可用，请重新登录。', INVALID_QNH_BROWSER_INPUT: '登录操作格式无效。',
-      QNH_BROWSER_DEMO_LIMIT: '今日手机登录试用额度已用完，请联系管理员。', QNH_BROWSER_START_RATE: '登录启动过于频繁，请稍候重试。',
+      QNH_BROWSER_BUSY: '当前登录窗口较多，请稍候重试。',
+      QNH_BROWSER_PROVIDER_LIMIT: '云端浏览器服务额度或频率受限，请管理员检查 Cloudflare 用量。',
+      QNH_BROWSER_START_RATE: '登录启动过于频繁，请稍候重试。',
     };
     const error = fail(response.status, value.code, messages[value.code]);
     const retry = response.headers.get('Retry-After');
@@ -229,18 +231,19 @@ export function createQnhPhoneRouter(env, { origin, now = () => Date.now(), cryp
   };
 }
 
-/** Only opaque lease IDs and daily IP hashes are persisted; releases never refund the browser-time allowance. */
+/** Only active opaque leases and start-rate state are used. Legacy daily counters remain stored but are never consulted or reset. */
 export class QnhBrowserBudget {
   constructor(state, env, { now = () => Date.now() } = {}) {
     this.storage = state.storage; this.now = now; this.queue = Promise.resolve();
   }
   serial(operation) { const result = this.queue.then(operation); this.queue = result.catch(() => {}); return result; }
   async load() {
-    const day = Math.floor(this.now() / DAY_MS);
     const saved = await this.storage.get('budget');
-    if (saved && (!ownObject(saved) || !Number.isInteger(saved.day) || !Number.isInteger(saved.usedMs)
-      || saved.usedMs < 0 || !Number.isFinite(saved.lastStartedAt) || !ownObject(saved.attempts) || !Array.isArray(saved.active))) throw notConfigured();
-    const value = !saved || saved.day !== day ? { day, usedMs: 0, lastStartedAt: saved?.lastStartedAt || 0, attempts: {}, active: [] } : saved;
+    if (saved && (!ownObject(saved) || !Number.isFinite(saved.lastStartedAt) || !Array.isArray(saved.active)
+      || (Object.hasOwn(saved, 'day') && !Number.isInteger(saved.day))
+      || (Object.hasOwn(saved, 'usedMs') && (!Number.isInteger(saved.usedMs) || saved.usedMs < 0))
+      || (Object.hasOwn(saved, 'attempts') && !ownObject(saved.attempts)))) throw notConfigured();
+    const value = saved || { lastStartedAt: 0, active: [] };
     value.active = value.active.filter(lease => TOKEN.test(lease.id || '') && Number.isFinite(lease.expiresAt) && lease.expiresAt > this.now());
     return value;
   }
@@ -262,30 +265,26 @@ export class QnhBrowserBudget {
           return json({ released: true });
         }
         if (!(TOKEN.test(body.ipHash || '') || body.ipHash === 'unknown')
-          || body.maximumMs !== QNH_PHONE_DEMO_LIMITS.reservationMs) throw invalid();
+          || body.maximumMs !== QNH_PHONE_SESSION_LIMITS.reservationMs) throw invalid();
         const now = this.now();
-        const dayEnd = (value.day + 1) * DAY_MS;
-        const reservedMs = Math.min(QNH_PHONE_DEMO_LIMITS.reservationMs, dayEnd - now);
         const deny = (code, retryMs) => {
           const error = fail(429, code, code === 'QNH_BROWSER_START_RATE'
-            ? '登录启动过于频繁，请稍候重试。' : '今日手机登录试用额度已用完，请联系管理员。');
+            ? '登录启动过于频繁，请稍候重试。' : '当前登录窗口较多，请稍候重试。');
           error.retryAfter = Math.max(1, Math.min(86_400, Math.ceil(retryMs / 1000)));
           throw error;
         };
         if (value.active.some(lease => lease.id === body.leaseId)) throw invalid();
-        if (reservedMs <= QNH_PHONE_DEMO_LIMITS.cleanupMs || value.usedMs + reservedMs > QNH_PHONE_DEMO_LIMITS.dailyMs
-          || value.active.length >= QNH_PHONE_DEMO_LIMITS.concurrent
-          || (value.attempts[body.ipHash] || 0) >= QNH_PHONE_DEMO_LIMITS.perIpAttempts) deny('QNH_BROWSER_DEMO_LIMIT', dayEnd - now);
-        if (value.lastStartedAt && now - value.lastStartedAt < QNH_PHONE_DEMO_LIMITS.newStartIntervalMs) {
-          deny('QNH_BROWSER_START_RATE', QNH_PHONE_DEMO_LIMITS.newStartIntervalMs - (now - value.lastStartedAt));
+        if (value.active.length >= QNH_PHONE_SESSION_LIMITS.concurrent) {
+          deny('QNH_BROWSER_BUSY', Math.min(...value.active.map(lease => lease.expiresAt)) - now);
         }
-        value.usedMs += reservedMs;
+        if (value.lastStartedAt && now - value.lastStartedAt < QNH_PHONE_SESSION_LIMITS.newStartIntervalMs) {
+          deny('QNH_BROWSER_START_RATE', QNH_PHONE_SESSION_LIMITS.newStartIntervalMs - (now - value.lastStartedAt));
+        }
         value.lastStartedAt = now;
-        value.attempts[body.ipHash] = (value.attempts[body.ipHash] || 0) + 1;
-        const expiresAt = now + reservedMs;
+        const expiresAt = now + QNH_PHONE_SESSION_LIMITS.reservationMs;
         value.active.push({ id: body.leaseId, expiresAt });
-        await this.save(value); // Persist before the caller is allowed to attempt a provider acquisition.
-        return json({ reserved: true, expiresAt: expiresAt - QNH_PHONE_DEMO_LIMITS.cleanupMs });
+        await this.save(value); // Persist the active lease before a provider acquisition.
+        return json({ reserved: true, expiresAt: expiresAt - QNH_PHONE_SESSION_LIMITS.cleanupMs });
       } catch (error) { return errorResponse(error); }
     });
   }
@@ -310,7 +309,7 @@ export class QnhPhoneSession {
   async budget(path, body) {
     const binding = this.env.QNH_BROWSER_BUDGET;
     if (!namespace(binding)) throw notConfigured();
-    const stub = binding.get(binding.idFromName('qnh-browser-demo-budget-v1'));
+    const stub = binding.get(binding.idFromName('qnh-browser-demo-budget-v1')); // Existing object identity is retained during migration.
     return unwrap(await stub.fetch(internalRequest(BUDGET_INTERNAL, path, body)));
   }
   async stop() {
@@ -323,9 +322,9 @@ export class QnhPhoneSession {
     try { await controller?.close(); }
     finally {
       // On eviction we cannot reconnect to the old browser. Its private transport closes and the provider's short idle timeout expires it.
-      // A persisted lease permits conservative quota cleanup, never session/credential restoration.
+      // A persisted lease permits concurrency cleanup, never session/credential restoration.
       // An evicted object cannot prove the old remote browser is closed, so retain that lease until its absolute expiry.
-      if (controller && marker?.leaseId) try { await this.budget('/release', { leaseId: marker.leaseId }); } catch { /* Original reservation remains charged. */ }
+      if (controller && marker?.leaseId) try { await this.budget('/release', { leaseId: marker.leaseId }); } catch { /* Active lease remains until its absolute expiry. */ }
       // Keep a capability-free tombstone so a stale cookie cannot silently recreate this phone object after eviction.
       await this.storage.put('retired', true);
       await this.storage.delete('session');
@@ -383,7 +382,7 @@ export class QnhPhoneSession {
         const leaseId = createQnhPhoneCookie(this.crypto).token;
         const grant = await this.budget('/reserve', { leaseId, ipHash, maximumMs });
         if (grant.reserved !== true || !Number.isFinite(grant.expiresAt)
-          || grant.expiresAt <= this.now() || grant.expiresAt > this.now() + QNH_PHONE_DEMO_LIMITS.reservationMs) throw unavailable();
+          || grant.expiresAt <= this.now() || grant.expiresAt > this.now() + QNH_PHONE_SESSION_LIMITS.reservationMs) throw unavailable();
         this.marker = { leaseId, absoluteExpiresAt: grant.expiresAt,
           expiresAt: Math.min(grant.expiresAt, this.now() + QNH_BROWSER_LIMITS.loginMs) };
         await this.storage.put('session', this.marker);

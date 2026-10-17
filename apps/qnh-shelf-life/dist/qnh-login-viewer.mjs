@@ -4,7 +4,8 @@ const KEYS = new Set(['Backspace', 'Delete', 'Tab', 'Enter', 'Escape', 'ArrowLef
 const INPUT_PATH = '/api/qnh/login/input';
 const controlCharacters = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u;
 const ERROR_MESSAGES = Object.freeze({
-  QNH_BROWSER_DEMO_LIMIT: '今日登录测试次数已用完，明天北京时间08:00后可重试。',
+  QNH_BROWSER_PROVIDER_LIMIT: '云端浏览器服务额度或频率受限，请管理员检查 Cloudflare 用量。',
+  QNH_BROWSER_BUSY: '当前登录窗口较多，请稍候重试。',
   QNH_BROWSER_START_RATE: '登录启动过于频繁，请稍候关闭此窗口后重新登录。',
   QNH_BROWSER_ORIGIN_DENIED: '登录来源校验失败，请从鲜期主地址重新打开程序。',
   QNH_BROWSER_NOT_CONFIGURED: '手机登录服务尚未完成配置，请联系管理员。',
@@ -16,7 +17,7 @@ const ERROR_MESSAGES = Object.freeze({
   QNH_BROWSER_INPUT_RATE: '操作较快，请稍候再输入。',
   INVALID_QNH_BROWSER_INPUT: '当前登录操作无效，请重新操作。',
 });
-const FATAL_CODES = new Set(['QNH_BROWSER_DEMO_LIMIT', 'QNH_BROWSER_START_RATE', 'QNH_BROWSER_ORIGIN_DENIED', 'QNH_BROWSER_NOT_CONFIGURED', 'QNH_BROWSER_UNAVAILABLE']);
+const FATAL_CODES = new Set(['QNH_BROWSER_PROVIDER_LIMIT', 'QNH_BROWSER_BUSY', 'QNH_BROWSER_START_RATE', 'QNH_BROWSER_ORIGIN_DENIED', 'QNH_BROWSER_NOT_CONFIGURED', 'QNH_BROWSER_UNAVAILABLE']);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const exactKeys = (value, keys) => object(value) && Object.keys(value).length === keys.length && Object.keys(value).every(key => keys.includes(key));
 

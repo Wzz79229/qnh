@@ -54,4 +54,4 @@ run_worker_first = ["/api/*"]
 # GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY are runtime
 # settings. QNH_CONNECTOR_KEY is only for the local bridge. Never put values here.
 # Tenant identity comes only from this phone's verified QNH session. No fixed tenant.
-# Browser time is hard capped to an 8-minute daily trial; no paid plan is enabled.
+# No application daily browser quota; provider limits and per-session protections remain. No paid plan is enabled.

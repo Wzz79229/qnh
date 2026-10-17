@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
-import { createQnhPhoneRouter, QnhPhoneSession, QnhBrowserBudget, QNH_PHONE_DEMO_LIMITS } from '../backend/qnh-phone-router.mjs';
-import { QNH_PHONE_COOKIE } from '../backend/qnh-browser-session.mjs';
+import { createQnhPhoneRouter, QnhPhoneSession, QnhBrowserBudget, QNH_PHONE_SESSION_LIMITS } from '../backend/qnh-phone-router.mjs';
+import { QNH_PHONE_COOKIE, QnhBrowserError } from '../backend/qnh-browser-session.mjs';
 
 const ORIGIN = 'https://phone.example.workers.dev';
 const TIME = Date.parse('2026-10-17T10:00:00Z');
@@ -58,6 +58,7 @@ function setup(options = {}) {
   }
   const factory = async () => {
     calls.acquisitions++;
+    if (options.startError) throw options.startError;
     if (options.startFailure) throw new Error('PRIVATE-PROVIDER-URL-wss://secret.example/token');
     const browser = {
       accessible: false,
@@ -120,8 +121,8 @@ test('a start issues a random HttpOnly phone cookie and returns only a bounded v
   assert.equal(response.headers.get('Cache-Control'), 'no-store');
   assert.equal(JSON.stringify(body).includes('sessionId'), false);
   const saved = await h.budgetStorage.get('budget');
-  assert.equal(saved.usedMs, 240_000);
-  assert.equal(Object.keys(saved.attempts)[0].length, 64);
+  assert.equal(saved.active.length, 1);
+  assert.deepEqual(Object.keys(saved).sort(), ['active', 'lastStartedAt']);
   assert.equal(JSON.stringify(saved).includes('192.0.2.10'), false);
 });
 
@@ -230,7 +231,7 @@ test('repeat start uses the same phone session without another quota reservation
   assert.equal(response.status, 200);
   assert.equal(response.headers.has('Set-Cookie'), false);
   assert.equal(h.calls.acquisitions, 1);
-  assert.equal((await h.budgetStorage.get('budget')).usedMs, 240_000);
+  assert.equal((await h.budgetStorage.get('budget')).active.length, 1);
 });
 
 test('viewer rejects arbitrary CDP, URLs, script, selectors and shortcuts before forwarding controls', async () => {
@@ -403,7 +404,7 @@ test('after authorization all viewer input and frame capture are frozen', async 
   assert.equal(h.calls.frames, 0);
 });
 
-test('cancel closes the browser, removes only its own lease and clears the opaque cookie without refunding time', async () => {
+test('cancel closes the browser, removes only its own active lease and clears the opaque cookie', async () => {
   const h = setup();
   const cookie = cookieOf(await h.router.handle(phoneRequest('start')));
   const response = await h.router.handle(phoneRequest('cancel', { cookie }));
@@ -412,7 +413,7 @@ test('cancel closes the browser, removes only its own lease and clears the opaqu
   assert.equal(h.calls.closes, 1);
   const saved = await h.budgetStorage.get('budget');
   assert.equal(saved.active.length, 0);
-  assert.equal(saved.usedMs, 240_000);
+  assert.equal(Object.hasOwn(saved, 'usedMs'), false);
   assert.equal((await h.router.status(phoneRequest('status', { method: 'GET', cookie }))).authorized, false);
   assert.equal(h.calls.acquisitions, 1);
 });
@@ -433,25 +434,38 @@ test('an explicitly restarted expired/cancelled phone always receives a new cook
   assert.equal(await old.storage.get('session'), undefined);
 });
 
-test('failed browser acquisitions consume a full reservation and errors never reflect provider capabilities', async () => {
+test('failed acquisitions release their leases and do not consume an application daily allowance', async () => {
   const h = setup({ startFailure: true });
-  const response = await h.router.handle(phoneRequest('start'));
-  assert.equal(response.status, 502);
-  assert.equal(response.headers.has('Set-Cookie'), false);
-  const text = await response.text();
-  assert.equal(text.includes('PRIVATE-PROVIDER'), false);
-  assert.equal(text.includes('wss://'), false);
-  assert.equal((await h.budgetStorage.get('budget')).usedMs, 240_000);
-  h.advance(21_000);
-  assert.equal((await h.router.handle(phoneRequest('start'))).status, 502);
-  h.advance(21_000);
-  const denied = await h.router.handle(phoneRequest('start'));
-  assert.equal(denied.status, 429);
-  assert.equal((await bodyOf(denied)).code, 'QNH_BROWSER_DEMO_LIMIT');
-  assert.equal(h.calls.acquisitions, 2);
+  for (let index = 0; index < 4; index++) {
+    if (index) h.advance(21_000);
+    const response = await h.router.handle(phoneRequest('start'));
+    assert.equal(response.status, 502);
+    assert.equal(response.headers.has('Set-Cookie'), false);
+    const text = await response.text();
+    assert.equal(text.includes('PRIVATE-PROVIDER'), false);
+    assert.equal(text.includes('wss://'), false);
+  }
+  assert.equal(h.calls.acquisitions, 4);
+  const saved = await h.budgetStorage.get('budget');
+  assert.equal(saved.active.length, 0);
+  assert.equal(Object.hasOwn(saved, 'usedMs'), false);
+  assert.equal(Object.hasOwn(saved, 'attempts'), false);
 });
 
-test('global rate and time allowance serialize simultaneous starts and deny further starts after cancellation', async () => {
+test('a real provider-limit classification retains its safe code and Retry-After through the phone object and public router', async () => {
+  const providerError = new QnhBrowserError(429, 'QNH_BROWSER_PROVIDER_LIMIT', 'private provider text must not be reflected');
+  providerError.retryAfter = 47;
+  const h = setup({ startError: providerError });
+  const response = await h.router.handle(phoneRequest('start'));
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get('Retry-After'), '47');
+  const body = await bodyOf(response);
+  assert.equal(body.code, 'QNH_BROWSER_PROVIDER_LIMIT');
+  assert.equal(body.error.includes('private provider text'), false);
+  assert.equal((await h.budgetStorage.get('budget')).active.length, 0);
+});
+
+test('global start rate serializes simultaneous attempts but cancellation does not impose a daily cap', async () => {
   const h = setup();
   const results = await Promise.all([h.router.handle(phoneRequest('start')), h.router.handle(phoneRequest('start', { ip: '192.0.2.11' }))]);
   assert.deepEqual(results.map(value => value.status).sort(), [200, 429]);
@@ -465,10 +479,44 @@ test('global rate and time allowance serialize simultaneous starts and deny furt
   assert.equal(second.status, 200);
   await h.router.handle(phoneRequest('cancel', { cookie: cookieOf(second) }));
   h.advance(21_000);
-  const denied = await h.router.handle(phoneRequest('start', { ip: '192.0.2.12' }));
-  assert.equal(denied.status, 429);
-  assert.equal((await h.budgetStorage.get('budget')).usedMs, QNH_PHONE_DEMO_LIMITS.dailyMs);
+  const third = await h.router.handle(phoneRequest('start', { ip: '192.0.2.12' }));
+  assert.equal(third.status, 200);
+  assert.equal(h.calls.acquisitions, 3);
+  assert.equal((await h.budgetStorage.get('budget')).active.length, 1);
+});
+
+test('two active windows produce only a short busy limit and closing a window permits another start', async () => {
+  const h = setup();
+  const first = await h.router.handle(phoneRequest('start'));
+  h.advance(21_000);
+  assert.equal((await h.router.handle(phoneRequest('start'))).status, 200);
+  h.advance(21_000);
+  const busy = await h.router.handle(phoneRequest('start'));
+  assert.equal(busy.status, 429);
+  assert.equal((await bodyOf(busy)).code, 'QNH_BROWSER_BUSY');
+  assert.equal(busy.headers.get('Retry-After'), '198');
   assert.equal(h.calls.acquisitions, 2);
+  await h.router.handle(phoneRequest('cancel', { cookie: cookieOf(first) }));
+  assert.equal((await h.router.handle(phoneRequest('start'))).status, 200);
+  assert.equal(h.calls.acquisitions, 3);
+});
+
+test('legacy full daily counters are retained unchanged and never block the authorized removal of application daily limits', async () => {
+  const h = setup();
+  const legacy = { day: Math.floor((TIME - 86_400_000) / 86_400_000), usedMs: 480_000, attempts: { unknown: 2, [lease('b')]: 2 },
+    lastStartedAt: TIME - 21_000, active: [] };
+  await h.budgetStorage.put('budget', legacy);
+  const started = await h.router.handle(phoneRequest('start'));
+  assert.equal(started.status, 200);
+  const body = await bodyOf(started);
+  assert.equal(Object.hasOwn(body, 'usedMs'), false);
+  assert.equal(Object.hasOwn(body, 'attempts'), false);
+  const saved = await h.budgetStorage.get('budget');
+  assert.equal(saved.day, legacy.day);
+  assert.equal(saved.usedMs, legacy.usedMs);
+  assert.deepEqual(saved.attempts, legacy.attempts);
+  assert.equal(saved.active.length, 1);
+  assert.equal(h.calls.acquisitions, 1);
 });
 
 test('absolute login alarm closes the session and never silently restores or acquires another browser', async () => {
@@ -506,7 +554,7 @@ test('the active authorized deadline is conservatively shorter than the reserved
   h.browsers[0].accessible = true;
   await h.router.handle(phoneRequest('verify', { cookie }));
   const entry = h.phones.get(cookie.split('=')[1]);
-  assert.equal(entry.storage.alarm, TIME + QNH_PHONE_DEMO_LIMITS.reservationMs - QNH_PHONE_DEMO_LIMITS.cleanupMs);
+  assert.equal(entry.storage.alarm, TIME + QNH_PHONE_SESSION_LIMITS.reservationMs - QNH_PHONE_SESSION_LIMITS.cleanupMs);
   h.advance(225_000);
   assert.equal((await h.router.status(phoneRequest('status', { method: 'GET', cookie }))).authorized, false);
   assert.equal(h.calls.closes, 1);
@@ -526,35 +574,35 @@ test('budget contracts reject arbitrary origins/paths, malformed leases and clie
   assert.equal(await h.budgetStorage.get('budget'), undefined);
 });
 
-test('daily budget resets only on the UTC boundary; partial reservations cannot run across midnight', async () => {
+test('a lease retains its full bounded lifetime across UTC midnight without a daily-reset dependency', async () => {
   const midnight = Date.parse('2026-10-18T00:00:00Z');
   const h = setup({ time: midnight - 40_000 });
   const first = await h.budget.fetch(budgetRequest('/reserve', { leaseId: lease('a'), ipHash: lease('b'), maximumMs: 240_000 }));
   assert.equal(first.status, 200);
-  assert.equal((await bodyOf(first)).expiresAt, midnight - 15_000);
-  assert.equal((await h.budgetStorage.get('budget')).usedMs, 40_000);
+  assert.equal((await bodyOf(first)).expiresAt, midnight + 185_000);
   h.advance(40_000);
   const next = await h.budget.fetch(budgetRequest('/reserve', { leaseId: lease('c'), ipHash: lease('b'), maximumMs: 240_000 }));
   assert.equal(next.status, 200);
   const saved = await h.budgetStorage.get('budget');
-  assert.equal(saved.usedMs, 240_000);
-  assert.equal(saved.active.length, 1);
-  assert.deepEqual(saved.attempts, { [lease('b')]: 1 });
+  assert.equal(saved.active.length, 2);
+  assert.equal(Object.hasOwn(saved, 'day'), false);
+  assert.equal(Object.hasOwn(saved, 'usedMs'), false);
+  assert.equal(Object.hasOwn(saved, 'attempts'), false);
 });
 
-test('insufficient midnight cleanup allowance refuses acquisition, and budget alarm removes expired leases', async () => {
+test('midnight imposes no application quota and the concurrency alarm removes expired leases', async () => {
   const midnight = Date.parse('2026-10-18T00:00:00Z');
   const near = setup({ time: midnight - 15_000 });
   assert.equal((await near.budget.fetch(budgetRequest('/reserve', {
     leaseId: lease('a'), ipHash: lease('b'), maximumMs: 240_000,
-  }))).status, 429);
+  }))).status, 200);
   const h = setup();
   await h.budget.fetch(budgetRequest('/reserve', { leaseId: lease('a'), ipHash: lease('b'), maximumMs: 240_000 }));
   h.advance(240_000);
   await h.budget.alarm();
   const saved = await h.budgetStorage.get('budget');
   assert.equal(saved.active.length, 0);
-  assert.equal(saved.usedMs, 240_000);
+  assert.equal(Object.hasOwn(saved, 'usedMs'), false);
   assert.equal(h.budgetStorage.alarm, null);
 });
 

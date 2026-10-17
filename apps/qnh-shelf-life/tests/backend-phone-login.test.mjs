@@ -372,7 +372,8 @@ test('cross-site and Pages-origin inline-login attempts are rejected before phon
 });
 
 test('phone errors retain safe status/code while discarding private DO/provider error text', async () => {
-  for (const [code, status] of [['QNH_BROWSER_NOT_CONFIGURED', 503], ['QNH_BROWSER_UNAVAILABLE', 502], ['QNH_BROWSER_DEMO_LIMIT', 429]]) {
+  for (const [code, status] of [['QNH_BROWSER_NOT_CONFIGURED', 503], ['QNH_BROWSER_UNAVAILABLE', 502],
+    ['QNH_BROWSER_BUSY', 429], ['QNH_BROWSER_PROVIDER_LIMIT', 429]]) {
     const h = harness({ statusReply: () => response({ code, error: 'PRIVATE-wss://provider.example/?jwt=SECRET' }, status) });
     const result = await h.request('/api/state', { cookie: PHONE_COOKIE });
     assert.equal(result.status, status);

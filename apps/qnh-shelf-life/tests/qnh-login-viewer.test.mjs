@@ -249,9 +249,10 @@ test('upstream errors and configuration details never appear in the viewer', asy
   assert.equal(app.requestCount('/api/qnh/login/frame'), 0); app.handle.close();
 });
 
-test('safe server codes explain configuration, origin, quota and rate failures without reflecting provider messages', async () => {
+test('safe server codes explain configuration, origin, real provider quota and rate failures without reflecting provider messages', async () => {
   const cases = [
-    ['QNH_BROWSER_DEMO_LIMIT', 429, /今日登录测试次数已用完/],
+    ['QNH_BROWSER_PROVIDER_LIMIT', 429, /云端浏览器服务额度或频率受限，请管理员检查 Cloudflare 用量/],
+    ['QNH_BROWSER_BUSY', 429, /当前登录窗口较多，请稍候重试/],
     ['QNH_BROWSER_START_RATE', 429, /等待21秒/],
     ['QNH_BROWSER_ORIGIN_DENIED', 403, /来源校验失败/],
     ['QNH_BROWSER_NOT_CONFIGURED', 503, /尚未完成配置/],
@@ -266,6 +267,35 @@ test('safe server codes explain configuration, origin, quota and rate failures w
     await app.advance(60_000); assert.equal(app.requestCount('/api/qnh/login/start'), 1, 'no automatic session start retries');
     app.handle.close();
   }
+});
+
+test('a real provider quota error does not guess a reset date or start another browser', async () => {
+  const app = harness({ fetch(path) {
+    if (path.endsWith('/start')) return new Response(JSON.stringify({ code: 'QNH_BROWSER_PROVIDER_LIMIT',
+      message: 'synthetic-private-provider-detail tomorrow 08:00' }), { status: 429,
+      headers: { 'Content-Type': 'application/json', 'Retry-After': '86400' } });
+  } });
+  await settle();
+  assert.equal(app.status(), '云端浏览器服务额度或频率受限，请管理员检查 Cloudflare 用量。');
+  assert.doesNotMatch(app.nodes.map(node => node.textContent).join(' '), /明天|08:00|次数已用完|synthetic-private/);
+  assert.equal(app.timers.size, 0); const requests = app.calls.length;
+  app.document.hidden = true; app.document.emit('visibilitychange');
+  await app.advance(86_400_000);
+  app.document.hidden = false; app.document.emit('visibilitychange'); await app.advance(0);
+  assert.equal(app.calls.length, requests, 'visibility and elapsed time cannot allocate or retry a cloud browser');
+  assert.equal(app.requestCount('/api/qnh/login/start'), 1); assert.equal(app.handle.closed, false);
+  app.handle.close(); assert.equal(app.timers.size, 0);
+});
+
+test('the removed application demo-limit code cannot supply a blocking quota message or reset time', async () => {
+  const app = harness({ fetch(path) {
+    if (path.endsWith('/start')) return new Response(JSON.stringify({ code: 'QNH_BROWSER_DEMO_LIMIT',
+      message: '今日登录测试次数已用完，明天北京时间08:00后可重试。' }), { status: 429 });
+  } });
+  await settle();
+  assert.match(app.status(), /暂时无法打开牵牛花登录/);
+  assert.doesNotMatch(app.nodes.map(node => node.textContent).join(' '), /明天|08:00|次数已用完|Cloudflare用量/);
+  app.handle.close();
 });
 
 test('oversized or unknown error bodies cannot supply a visible reason or inject text', async () => {

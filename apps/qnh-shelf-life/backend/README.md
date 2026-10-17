@@ -17,7 +17,7 @@ QNH_TENANT_MODE=per_tenant，不预设租户，也不接受客户端选择租户
 - 构建命令将部署产物 ../dist/connection.json 的 apiBase 改为 /。
 - Wrangler 保留 keep_vars=true，并声明 BROWSER、QNH_PHONE_SESSIONS、QNH_BROWSER_BUDGET。
 - 原运行时变量 GITHUB_APP_ID、GITHUB_APP_INSTALLATION_ID 和 Secret GITHUB_APP_PRIVATE_KEY 继续保留。无需重新创建凭据。
-- 每 UTC 日两次、合计八分钟的保守登录试用预算；未启用付费套餐，不承诺日常多人容量。
+- 不设程序每日登录次数或每日时长总量门槛；保留 21 秒启动间隔、最多两个并发窗口和单次会话截止。Cloudflare 自身限制独立报告，未启用付费套餐。
 
 ## GitHub 授权边界
 
