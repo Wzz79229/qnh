@@ -1,0 +1,66 @@
+name: Build Xianqi Android validation APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - apps/qnh-shelf-life/mobile-validation/**
+      - apps/qnh-shelf-life/local-query/extract.mjs
+      - apps/qnh-shelf-life/backend/qnh-browser-session.mjs
+      - apps/qnh-shelf-life/backend/qnh-product-proof.mjs
+      - apps/qnh-shelf-life/package-lock.json
+      - .github/workflows/xianqi-android-validation.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/qnh-shelf-life
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/qnh-shelf-life/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Verify phone query runtime
+        run: |
+          npm ci --ignore-scripts
+          node --test mobile-validation/tests/*.test.mjs
+          node mobile-validation/build-runtime.mjs
+      - name: Verify native URL boundaries
+        run: |
+          mkdir -p mobile-validation/build/url-policy
+          javac -d mobile-validation/build/url-policy mobile-validation/app/src/main/java/com/xianqi/phonevalidation/QnhUrlPolicy.java mobile-validation/tests/UrlPolicyTest.java
+          java -cp mobile-validation/build/url-policy com.xianqi.phonevalidation.UrlPolicyTest
+      - name: Build and lint Android APK
+        working-directory: apps/qnh-shelf-life/mobile-validation
+        run: |
+          sdkmanager 'platforms;android-35' 'build-tools;34.0.0'
+          gradle --no-daemon :app:assembleDebug :app:lintDebug
+          mkdir -p output
+          cp app/build/outputs/apk/debug/app-debug.apk output/xianqi-phone-validation-0.1.0.apk
+          sha256sum output/*.apk > output/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xianqi-phone-validation-0.1.0
+          path: |
+            apps/qnh-shelf-life/mobile-validation/output/*.apk
+            apps/qnh-shelf-life/mobile-validation/output/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
