@@ -13,6 +13,8 @@ const SESSION_SECONDS = 30 * 24 * 60 * 60;
 const MAX_PHOTO_BYTES = 400_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const encoder = new TextEncoder();
+const APP_AUTH_FAILURES = new Set(['GITHUB_APP_INVALID_KEY', 'GITHUB_APP_TIMEOUT', 'GITHUB_APP_INSTALLATION_FAILED',
+  'GITHUB_APP_INSTALLATION_INVALID', 'GITHUB_APP_TOKEN_FAILED', 'GITHUB_APP_SCOPE_INVALID']);
 
 class ApiError extends Error {
   constructor(status, code, message, headers = {}) {
@@ -187,18 +189,25 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
   async function githubAppReady(env) {
     const identity = [env.GITHUB_APP_ID, env.GITHUB_APP_INSTALLATION_ID, env.GITHUB_APP_PRIVATE_KEY];
     if (!authorizationProbe || identity.some((value, index) => value !== authorizationProbe.identity[index])) {
-      authorizationProbe = { identity, ready: false, until: 0, pending: null };
+      authorizationProbe = { identity, ready: false, detail: null, upstreamStatus: null, until: 0, pending: null };
     }
     const entry = authorizationProbe;
-    if (entry.until > now()) return entry.ready;
+    if (entry.until > now()) return { ready: entry.ready, detail: entry.detail, upstreamStatus: entry.upstreamStatus };
     if (!entry.pending) {
       // Public readiness checks only validate the fixed installation and scoped token.
       // They never read repository files, grant member access, or expose credentials.
       entry.pending = (async () => {
-        try { await githubToken(env); entry.ready = true; }
-        catch { entry.ready = false; }
+        try { await githubToken(env); entry.ready = true; entry.detail = null; entry.upstreamStatus = null; }
+        catch (error) {
+          entry.ready = false;
+          entry.detail = error instanceof GitHubAuthorizationError && APP_AUTH_FAILURES.has(error.code)
+            ? error.code : 'GITHUB_APP_AUTH_FAILED';
+          entry.upstreamStatus = ['GITHUB_APP_INSTALLATION_FAILED', 'GITHUB_APP_TOKEN_FAILED'].includes(entry.detail)
+            && Number.isInteger(error.upstreamStatus) && error.upstreamStatus >= 400 && error.upstreamStatus <= 599
+            ? error.upstreamStatus : null;
+        }
         entry.until = now() + 30_000;
-        return entry.ready;
+        return { ready: entry.ready, detail: entry.detail, upstreamStatus: entry.upstreamStatus };
       })().finally(() => { entry.pending = null; });
     }
     return entry.pending;
@@ -376,9 +385,12 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
         if (url.pathname === '/api/session') {
           if (!qnhLoginRequired(env)) return json(request, { configured: true, authorized: active });
           const appMode = validateGitHubAuthorization(env).mode === 'app';
-          if (appMode && !await githubAppReady(env)) {
+          const readiness = appMode ? await githubAppReady(env) : null;
+          if (readiness && !readiness.ready) {
             return json(request, { configured: true, authorized: false, loginMethod: 'qnh_pending', githubAuthorization: 'unavailable',
-              code: 'GITHUB_APP_AUTH_FAILED', message: 'GitHub 仓库授权验证未通过，请管理员检查 App 安装范围、权限和私钥。' }, 503, { 'Retry-After': '30' });
+              code: 'GITHUB_APP_AUTH_FAILED', githubAuthorizationDetail: readiness.detail,
+              ...(readiness.upstreamStatus === null ? {} : { githubAuthorizationStatus: readiness.upstreamStatus }),
+              message: 'GitHub 仓库授权验证未通过，请管理员检查 App 安装范围、权限和私钥。' }, 503, { 'Retry-After': '30' });
           }
           return json(request, { configured: true, authorized: false, loginMethod: 'qnh_pending',
             ...(appMode ? { githubAuthorization: 'ready' } : {}), message: '牵牛花员工手机登录尚未接通，请由管理员取得官方登录授权接口。' });

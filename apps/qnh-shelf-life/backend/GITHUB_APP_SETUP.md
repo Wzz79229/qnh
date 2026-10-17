@@ -40,7 +40,7 @@ Wrangler 已启用 `keep_vars = true`，后续从 GitHub 自动部署时保留�
 
 后台使用 RS256 签名获取仅 `bzq` 的 Contents 读写访问凭据，并在过期前自动刷新。JWT、PEM、访问凭据仅在后台内存中，不写 GitHub、日志、前端或浏览器缓存。GitHub 拒绝凭据时清除内存缓存，下次重新验证；不会自动重试不确定的业务写入。
 
-生产使用 `MEMBER_AUTH_MODE=qnh`。`/api/session` 会实际验证 GitHub App 安装和仅限 `bzq` 的受限令牌签发；成功增加 `githubAuthorization:ready`，失败返回 503 和 `githubAuthorization:unavailable`。检查不读取业务文件，不向前端返回令牌、签名或私钥；按完整配置隔离缓存与并发请求，成功及失败各缓存 30 秒，避免刷新反复触发外部授权。
+生产使用 `MEMBER_AUTH_MODE=qnh`。`/api/session` 会实际验证 GitHub App 安装和仅限 `bzq` 的受限令牌签发；成功增加 `githubAuthorization:ready`，失败返回 503 和 `githubAuthorization:unavailable`。失败时 `githubAuthorizationDetail` 仅包含固定分类（密钥、安装、签发、范围或超时），GitHub 明确返回 HTTP 错误时另含数字 `githubAuthorizationStatus`；不返回上游正文或标头。检查不读取业务文件，不向前端返回令牌、签名或私钥；按完整配置隔离缓存与并发请求，成功及失败各缓存 30 秒，避免刷新反复触发外部授权。
 
 当前未取得可验证的牵牛花员工登录接口，所以即使 GitHub 授权通过，仍返回 `loginMethod:qnh_pending`、`authorized:false`；不会允许团队口令、电脑登录或旧团队 Cookie 代替员工身份。授权就绪检查不等于业务文件读取或批次保存实测。只有接入身份、再完成手机扫码查询与批次保存实测，才能算整体接通。
 

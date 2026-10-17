@@ -106,9 +106,12 @@ async function readJSON(response) {
 export function createGitHubAuthorization({ fetchImpl = globalThis.fetch, now = () => Date.now(), cryptoImpl = globalThis.crypto } = {}) {
   let current = null;
 
-  async function request(path, jwt, body) {
+  async function request(path, jwt, phase, body) {
+    // The call sites fix the phase; upstream messages and status text never become diagnostics.
+    const failureCode = phase === 'installation' ? 'GITHUB_APP_INSTALLATION_FAILED' : 'GITHUB_APP_TOKEN_FAILED';
     const controller = new AbortController();
     let timer;
+    let upstreamStatus;
     try {
       return await Promise.race([(async () => {
         const response = await fetchImpl(ROOT + path, {
@@ -117,12 +120,18 @@ export function createGitHubAuthorization({ fetchImpl = globalThis.fetch, now = 
             'X-GitHub-Api-Version': '2026-03-10', ...(body ? { 'Content-Type': 'application/json' } : {}) },
           ...(body ? { body: JSON.stringify(body) } : {}),
         });
-        if (!response.ok || response.redirected || response.url && new URL(response.url).origin !== ROOT) throw new GitHubAuthorizationError();
+        if (response.redirected || response.url && new URL(response.url).origin !== ROOT) throw new GitHubAuthorizationError();
+        if (!response.ok) {
+          if (Number.isInteger(response.status) && response.status >= 400 && response.status <= 599) upstreamStatus = response.status;
+          throw new GitHubAuthorizationError();
+        }
         return await readJSON(response);
       })(), new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new GitHubAuthorizationError('GITHUB_APP_TIMEOUT', 504)); }, 10000); })]);
     } catch (error) {
-      if (error instanceof GitHubAuthorizationError) throw error;
-      throw new GitHubAuthorizationError();
+      if (error instanceof GitHubAuthorizationError && error.code === 'GITHUB_APP_TIMEOUT') throw error;
+      const failure = new GitHubAuthorizationError(failureCode);
+      if (upstreamStatus !== undefined) failure.upstreamStatus = upstreamStatus;
+      throw failure;
     } finally { clearTimeout(timer); }
   }
 
@@ -132,18 +141,22 @@ export function createGitHubAuthorization({ fetchImpl = globalThis.fetch, now = 
     const message = base64url(encoder.encode(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))) + '.'
       + base64url(encoder.encode(JSON.stringify({ iat: seconds - 60, exp: seconds + 540, iss: settings.appId })));
     const jwt = message + '.' + base64url(new Uint8Array(await cryptoImpl.subtle.sign('RSASSA-PKCS1-v1_5', key, encoder.encode(message))));
-    const installation = await request(`/repos/${REPOSITORY}/installation`, jwt);
-    if (String(installation.id) !== settings.installationId || String(installation.app_id) !== settings.appId
-      || installation.account?.login?.toLowerCase() !== 'wzz79229' || installation.permissions?.contents !== 'write'
-      || installation.suspended_at !== null) throw new GitHubAuthorizationError();
-    const result = await request(`/app/installations/${settings.installationId}/access_tokens`, jwt, { repositories: ['bzq'], permissions: { contents: 'write' } });
-    const expires = Date.parse(result.expires_at);
+    const installation = await request(`/repos/${REPOSITORY}/installation`, jwt, 'installation');
+    const matchesId = (value, expected) => ['number', 'string'].includes(typeof value) && String(value) === expected;
+    if (!matchesId(installation.id, settings.installationId) || !matchesId(installation.app_id, settings.appId)
+      || typeof installation.account?.login !== 'string' || installation.account.login.toLowerCase() !== 'wzz79229'
+      || installation.permissions?.contents !== 'write' || installation.suspended_at !== null) {
+      throw new GitHubAuthorizationError('GITHUB_APP_SCOPE_INVALID');
+    }
+    const result = await request(`/app/installations/${settings.installationId}/access_tokens`, jwt, 'token', { repositories: ['bzq'], permissions: { contents: 'write' } });
+    const expires = typeof result.expires_at === 'string' ? Date.parse(result.expires_at) : NaN;
     if (typeof result.token !== 'string' || !result.token || result.token.length > 32768 || /[\s\x00-\x1f\x7f]/.test(result.token)
       || !Number.isFinite(expires) || expires <= now() + 90000 || expires > now() + 3660000
       || result.permissions?.contents !== 'write' || Object.entries(result.permissions).some(([name, level]) => !['contents', 'metadata'].includes(name) && level !== 'none')
       || result.permissions.metadata !== undefined && result.permissions.metadata !== 'read'
-      || !Array.isArray(result.repositories) || result.repositories.length !== 1 || result.repositories[0]?.full_name?.toLowerCase() !== REPOSITORY.toLowerCase()) {
-      throw new GitHubAuthorizationError();
+      || !Array.isArray(result.repositories) || result.repositories.length !== 1 || typeof result.repositories[0]?.full_name !== 'string'
+      || result.repositories[0].full_name.toLowerCase() !== REPOSITORY.toLowerCase()) {
+      throw new GitHubAuthorizationError('GITHUB_APP_SCOPE_INVALID');
     }
     entry.value = result.token;
     entry.expires = expires;

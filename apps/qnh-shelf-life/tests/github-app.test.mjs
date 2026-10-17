@@ -109,7 +109,7 @@ test('private-key configuration rotation cannot reuse the previous cache', async
 test('wrong account, app, installation, permission or suspension is denied before minting', async () => {
   for (const patch of [{ id: 789 }, { app_id: 789 }, { account: { login: 'other' } }, { permissions: { contents: 'read' } }, { suspended_at: '2026-10-17T00:00:00Z' }]) {
     const f = fixture({ changeInstallation: value => ({ ...value, ...patch }) });
-    await assert.rejects(f.token(APP), GitHubAuthorizationError);
+    await assert.rejects(f.token(APP), error => error instanceof GitHubAuthorizationError && error.code === 'GITHUB_APP_SCOPE_INVALID');
     assert.equal(f.calls.length, 1);
   }
 });
@@ -120,13 +120,14 @@ test('token response cannot widen scope or return missing, expired, oversized or
     { token: 'bad token' }, { token: '' }, { token: 'x'.repeat(32769) }, { expires_at: new Date(START + 10000).toISOString() },
     { expires_at: new Date(START + 7200000).toISOString() }]) {
     const f = fixture({ changeToken: value => ({ ...value, ...patch }) });
-    await assert.rejects(f.token(APP), GitHubAuthorizationError);
+    await assert.rejects(f.token(APP), error => error instanceof GitHubAuthorizationError && error.code === 'GITHUB_APP_SCOPE_INVALID');
   }
 });
 
 test('a failed refresh is not cached or reflected; subsequent attempt can recover', async () => {
   const f = fixture({ fail: call => call === 1 });
-  await assert.rejects(f.token(APP), error => error instanceof GitHubAuthorizationError && !error.message.includes('PRIVATE_EXCEPTION'));
+  await assert.rejects(f.token(APP), error => error instanceof GitHubAuthorizationError
+    && error.code === 'GITHUB_APP_INSTALLATION_FAILED' && !error.message.includes('PRIVATE_EXCEPTION'));
   assert.equal(await f.token(APP), issued(START).token);
   assert.equal(f.calls.length, 3);
 });
@@ -142,6 +143,89 @@ test('redirects, malformed JSON and bounded response overflow fail closed', asyn
     new Response('{}', { headers: { 'Content-Length': '65537' } }), new Response('x'.repeat(65537))]) {
     const token = createGitHubAuthorization({ fetchImpl: async () => response, now: () => START, cryptoImpl: webcrypto });
     await assert.rejects(token(APP), GitHubAuthorizationError);
+  }
+});
+
+function phaseFixture(phase, reply) {
+  const calls = [];
+  const token = createGitHubAuthorization({ now: () => START, cryptoImpl: webcrypto, fetchImpl: async (url, options) => {
+    calls.push({ url, options });
+    const [header, payload, signature] = options.headers.Authorization.slice(7).split('.');
+    assert.equal(verify('RSA-SHA256', Buffer.from(header + '.' + payload), keys.publicKey, Buffer.from(signature, 'base64url')), true);
+    assert.equal(options.redirect, 'error');
+    if (options.method === 'GET') {
+      assert.equal(url, 'https://api.github.com/repos/Wzz79229/bzq/installation');
+      if (phase === 'installation') return reply();
+      return Response.json(installation());
+    }
+    assert.equal(url, 'https://api.github.com/app/installations/456/access_tokens');
+    assert.deepEqual(JSON.parse(options.body), { repositories: ['bzq'], permissions: { contents: 'write' } });
+    return reply();
+  } });
+  return { token, calls };
+}
+
+const PRIVATE_DIAGNOSTIC = 'PRIVATE_BODY_HEADER_AND_EXCEPTION_DO_NOT_REFLECT';
+
+for (const phase of ['installation', 'token']) {
+  const expectedCode = phase === 'installation' ? 'GITHUB_APP_INSTALLATION_FAILED' : 'GITHUB_APP_TOKEN_FAILED';
+  test(`${phase} HTTP, network and invalid responses receive a fixed phase code without sensitive reflection`, async () => {
+    const cases = [
+      ...[400, 401, 403, 404, 422, 429, 500, 599].map(status => [() => new Response(PRIVATE_DIAGNOSTIC, {
+        status, headers: { 'X-Private-Diagnostic': PRIVATE_DIAGNOSTIC },
+      }), status]),
+      [() => new Response(PRIVATE_DIAGNOSTIC, { status: 302, headers: { Location: `https://untrusted.example/${PRIVATE_DIAGNOSTIC}` } })],
+      [() => new Response(PRIVATE_DIAGNOSTIC)],
+      [() => new Response('[]')],
+      [() => new Response('{}', { headers: { 'Content-Length': '65537' } })],
+      [() => new Response('x'.repeat(65537))],
+      [() => { throw Object.assign(new Error(PRIVATE_DIAGNOSTIC), { code: PRIVATE_DIAGNOSTIC, upstreamStatus: 403 }); }],
+    ];
+    for (const [reply, upstreamStatus] of cases) {
+      const f = phaseFixture(phase, reply);
+      await assert.rejects(f.token(APP), error => {
+        assert.ok(error instanceof GitHubAuthorizationError);
+        assert.equal(error.code, expectedCode);
+        assert.equal(error.status, 502);
+        assert.equal(error.upstreamStatus, upstreamStatus);
+        if (upstreamStatus === undefined) assert.equal(Object.hasOwn(error, 'upstreamStatus'), false);
+        const diagnostic = JSON.stringify({ ...error, message: error.message });
+        for (const secret of [PRIVATE_DIAGNOSTIC, PEM, PKCS1, issued(START).token,
+          ...f.calls.map(call => call.options.headers.Authorization.slice(7))]) {
+          assert.equal(diagnostic.includes(secret), false);
+        }
+        return true;
+      });
+      assert.equal(f.calls.length, phase === 'installation' ? 1 : 2);
+    }
+  });
+
+  test(`${phase} timeout retains TIMEOUT without an upstream HTTP status`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let started;
+    const waiting = new Promise(resolve => { started = resolve; });
+    const f = phaseFixture(phase, () => { started(); return new Promise(() => {}); });
+    const rejected = assert.rejects(f.token(APP), error => {
+      assert.equal(error.code, 'GITHUB_APP_TIMEOUT');
+      assert.equal(error.status, 504);
+      assert.equal(Object.hasOwn(error, 'upstreamStatus'), false);
+      return true;
+    });
+    await waiting;
+    t.mock.timers.tick(10000);
+    await rejected;
+  });
+}
+
+test('malformed installation and token scope fields cannot escape classification as generic exceptions', async () => {
+  for (const patch of [{ id: { toString: 'not-a-function' } }, { account: { login: 123 } }]) {
+    const f = fixture({ changeInstallation: value => ({ ...value, ...patch }) });
+    await assert.rejects(f.token(APP), error => error.code === 'GITHUB_APP_SCOPE_INVALID' && !Object.hasOwn(error, 'upstreamStatus'));
+    assert.equal(f.calls.length, 1);
+  }
+  for (const patch of [{ expires_at: { toString: 'not-a-function' } }, { repositories: [{ full_name: 123 }] }]) {
+    const f = fixture({ changeToken: value => ({ ...value, ...patch }) });
+    await assert.rejects(f.token(APP), error => error.code === 'GITHUB_APP_SCOPE_INVALID' && !Object.hasOwn(error, 'upstreamStatus'));
   }
 });
 
@@ -174,7 +258,8 @@ test('Worker authenticates members before minting, then uses App token for fixed
 
 const ORIGIN = 'https://wzz79229.github.io';
 
-function readinessFixture({ fail = () => false, changeInstallation = value => value, changeToken = value => value, beforeFetch = async () => {} } = {}) {
+function readinessFixture({ fail = () => false, changeInstallation = value => value, changeToken = value => value,
+  beforeFetch = async () => {}, responseFor = () => null } = {}) {
   let time = START;
   const calls = [];
   const installations = new Map([['123', '456'], ['124', '456']]);
@@ -190,6 +275,8 @@ function readinessFixture({ fail = () => false, changeInstallation = value => va
     assert.equal(options.credentials, 'omit');
     await beforeFetch(call, calls.length);
     if (fail(call, calls.length)) throw new Error('PRIVATE_UPSTREAM_EXCEPTION_DO_NOT_REFLECT');
+    const override = responseFor(call, calls.length);
+    if (override) return override;
     const installationId = installations.get(claims.iss);
     assert.ok(installationId, 'The test only permits synthetic known app IDs');
     if (options.method === 'GET') {
@@ -258,6 +345,8 @@ test('QNH session failure is generic, backs off for 30 seconds and recovers with
   const failure = await first.json();
   assertPendingIdentity(failure, 'unavailable');
   assert.equal(failure.code, 'GITHUB_APP_AUTH_FAILED');
+  assert.equal(failure.githubAuthorizationDetail, 'GITHUB_APP_INSTALLATION_FAILED');
+  assert.equal(Object.hasOwn(failure, 'githubAuthorizationStatus'), false);
   assertNoAuthorizationDisclosure(failure, f.calls);
   assert.equal(f.calls.length, 1);
   unavailable = false;
@@ -319,7 +408,10 @@ test('bad DER, denied installation and widened minted token never appear ready',
   const response = await malformed.request('session', {}, { ...malformed.environment,
     GITHUB_APP_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----YQ==-----END PRIVATE KEY-----' });
   assert.equal(response.status, 503);
-  assertPendingIdentity(await response.json(), 'unavailable');
+  const malformedBody = await response.json();
+  assertPendingIdentity(malformedBody, 'unavailable');
+  assert.equal(malformedBody.githubAuthorizationDetail, 'GITHUB_APP_INVALID_KEY');
+  assert.equal(Object.hasOwn(malformedBody, 'githubAuthorizationStatus'), false);
   assert.equal(malformed.calls.length, 0);
   for (const options of [{ changeInstallation: value => ({ ...value, account: { login: 'other' } }) },
     { changeToken: value => ({ ...value, repositories: [{ full_name: 'Wzz79229/qnh' }] }) }]) {
@@ -328,8 +420,45 @@ test('bad DER, denied installation and widened minted token never appear ready',
     assert.equal(denied.status, 503);
     const body = await denied.json();
     assertPendingIdentity(body, 'unavailable');
+    assert.equal(body.githubAuthorizationDetail, 'GITHUB_APP_SCOPE_INVALID');
+    assert.equal(Object.hasOwn(body, 'githubAuthorizationStatus'), false);
     assertNoAuthorizationDisclosure(body, f.calls);
   }
+});
+
+test('readiness exposes only fixed phase and numeric HTTP diagnostics while keeping the main error code unchanged', async () => {
+  for (const [method, status, detail] of [['GET', 401, 'GITHUB_APP_INSTALLATION_FAILED'], ['POST', 403, 'GITHUB_APP_TOKEN_FAILED']]) {
+    const f = readinessFixture({ responseFor: call => call.options.method === method
+      ? new Response(PRIVATE_DIAGNOSTIC, { status, headers: { 'X-Private': PRIVATE_DIAGNOSTIC } }) : null });
+    const response = await f.request();
+    assert.equal(response.status, 503);
+    const body = await response.json();
+    assert.equal(body.code, 'GITHUB_APP_AUTH_FAILED');
+    assert.equal(body.githubAuthorizationDetail, detail);
+    assert.equal(body.githubAuthorizationStatus, status);
+    assertPendingIdentity(body, 'unavailable');
+    assertNoAuthorizationDisclosure(body, f.calls);
+    assert.equal(JSON.stringify(body).includes(PRIVATE_DIAGNOSTIC), false);
+    assert.equal(response.headers.get('X-Private'), null);
+    const previousCalls = f.calls.length;
+    assert.deepEqual(await (await f.request()).json(), body);
+    assert.equal(f.calls.length, previousCalls);
+  }
+});
+
+test('readiness maps unknown provider exceptions to AUTH_FAILED without an invented HTTP status', async () => {
+  const worker = createWorker({ now: () => START, cryptoImpl: { subtle: { digest: async () => {
+    throw Object.assign(new Error(PRIVATE_DIAGNOSTIC), { code: 'PRIVATE_UNTRUSTED_ERROR_CODE', upstreamStatus: 401 });
+  } } }, fetchImpl: async () => { throw new Error('No network request expected'); } });
+  const response = await worker.fetch(new Request('https://example.workers.dev/api/session', { headers: { Origin: ORIGIN } }), { ...APP, ALLOWED_ORIGIN: ORIGIN });
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.code, 'GITHUB_APP_AUTH_FAILED');
+  assert.equal(body.githubAuthorizationDetail, 'GITHUB_APP_AUTH_FAILED');
+  assert.equal(Object.hasOwn(body, 'githubAuthorizationStatus'), false);
+  assertPendingIdentity(body, 'unavailable');
+  assert.equal(JSON.stringify(body).includes(PRIVATE_DIAGNOSTIC), false);
+  assert.equal(JSON.stringify(body).includes('PRIVATE_UNTRUSTED_ERROR_CODE'), false);
 });
 
 test('invalid origins, preflight and unauthenticated member routes do not trigger any App probe', async () => {
