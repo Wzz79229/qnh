@@ -3,6 +3,20 @@ const LIMITS = Object.freeze({ loginMs: 180_000, frameBytes: 2_000_000, textLeng
 const KEYS = new Set(['Backspace', 'Delete', 'Tab', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']);
 const INPUT_PATH = '/api/qnh/login/input';
 const controlCharacters = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u;
+const ERROR_MESSAGES = Object.freeze({
+  QNH_BROWSER_DEMO_LIMIT: '今日手机登录试用额度已用完，请联系管理员。',
+  QNH_BROWSER_START_RATE: '登录启动过于频繁，请稍候关闭此窗口后重新登录。',
+  QNH_BROWSER_ORIGIN_DENIED: '登录来源校验失败，请从鲜期主地址重新打开程序。',
+  QNH_BROWSER_NOT_CONFIGURED: '手机登录服务尚未完成配置，请联系管理员。',
+  QNH_BROWSER_UNAVAILABLE: '牵牛花连接暂时不可用，请关闭此窗口后重试。',
+  QNH_BROWSER_SESSION_EXPIRED: '牵牛花登录会话已结束，请关闭此窗口后重新登录。',
+  QNH_BROWSER_LOGIN_REQUIRED: '请关闭此窗口后重新登录牵牛花。',
+  QNH_BROWSER_INPUT_FROZEN: '正在确认登录，请稍候再操作。',
+  QNH_BROWSER_FRAME_RATE: '登录画面刷新较快，请稍候。',
+  QNH_BROWSER_INPUT_RATE: '操作较快，请稍候再输入。',
+  INVALID_QNH_BROWSER_INPUT: '当前登录操作无效，请重新操作。',
+});
+const FATAL_CODES = new Set(['QNH_BROWSER_DEMO_LIMIT', 'QNH_BROWSER_START_RATE', 'QNH_BROWSER_ORIGIN_DENIED', 'QNH_BROWSER_NOT_CONFIGURED']);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const exactKeys = (value, keys) => object(value) && Object.keys(value).length === keys.length && Object.keys(value).every(key => keys.includes(key));
 
@@ -96,14 +110,23 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
   const status = create('p', '正在打开牵牛花登录…', { class: 'qnh-viewer-status', role: 'status', 'aria-live': 'polite' });
   dialog.append(style, header, help, screen, toolbar, form, status);
   const controls = [previous, remove, enter, up, down, verify, text, send];
-  let closed = false, started = false, busy = true, authorized = false, currentFrame = null, timer = null, expiryTimer = null;
+  let closed = false, halted = false, cancellationSent = false, started = false, busy = true, authorized = false, currentFrame = null, timer = null, expiryTimer = null;
   let deadline = now() + LIMITS.loginMs, lastVerify = now(), inputCount = 0, activePointer = null, gesture = [];
   const requests = new Set(), listeners = [];
   const listen = (node, name, listener, options) => { node.addEventListener(name, listener, options); listeners.push(() => node.removeEventListener(name, listener, options)); };
-  const setBusy = value => { busy = value; for (const control of controls) control.disabled = value || !started || closed; };
+  const setBusy = value => { busy = value; for (const control of controls) control.disabled = value || !started || closed || halted; };
   setBusy(true);
   const safelyNotify = callback => { try { Promise.resolve(callback()).catch(() => {}); } catch { /* A caller failure must not revive a closed viewer. */ } };
   const revokeFrame = () => { if (currentFrame) { urlAPI.revokeObjectURL(currentFrame); currentFrame = null; } image.removeAttribute('src'); };
+  const cancelSession = () => {
+    if (cancellationSent) return;
+    cancellationSent = true;
+    // Fixed same-origin endpoint. The cancellation carries no password, browser ID, or client auth claim.
+    try {
+      Promise.resolve(fetchImpl('/api/qnh/login/cancel', { method: 'POST', credentials: 'include', cache: 'no-store', redirect: 'error',
+        headers: { 'Content-Type': 'application/json' }, body: '{}', keepalive: true })).catch(() => {});
+    } catch { /* A synchronous transport failure must not interrupt local cleanup. */ }
+  };
 
   function finish({ cancel = true, notify = false, message } = {}) {
     if (closed) return;
@@ -115,18 +138,25 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
     revokeFrame();
     if (dialog.open && typeof dialog.close === 'function') dialog.close();
     dialog.remove();
-    if (cancel) {
-      // Fixed same-origin endpoint. The cancellation carries no password, browser ID, or client auth claim.
-      Promise.resolve(fetchImpl('/api/qnh/login/cancel', { method: 'POST', credentials: 'include', cache: 'no-store', redirect: 'error',
-        headers: { 'Content-Type': 'application/json' }, body: '{}', keepalive: true })).catch(() => {});
-    }
+    if (cancel) cancelSession();
     if (notify) safelyNotify(() => onClose({ reason: message || 'closed' }));
   }
 
   function expire() { finish({ notify: true, message: 'expired' }); }
+  function haltWithMessage(message) {
+    if (closed || halted) return;
+    halted = true; started = false;
+    timers.clearTimeout(timer); timers.clearTimeout(expiryTimer);
+    for (const request of requests) request.abort();
+    requests.clear(); text.value = ''; activePointer = null; gesture = [];
+    revokeFrame(); setBusy(false); cancelSession();
+    // Keep the dialog open: deleting it immediately on an initial 401/410 looked like an unresponsive login button.
+    status.textContent = message;
+  }
+  const showExpired = () => haltWithMessage(ERROR_MESSAGES.QNH_BROWSER_SESSION_EXPIRED);
   function applyStatus(value) {
     // A body read may finish after its fetch was aborted or its DOM was removed.
-    if (closed) return true;
+    if (closed || halted) return true;
     if (!object(value) || value.loginMethod !== 'qnh_browser' || !object(value.viewport)
       || value.viewport.width !== VIEWPORT.width || value.viewport.height !== VIEWPORT.height
       || !Number.isFinite(value.expiresAt) || value.expiresAt <= now()) throw new Error('invalid-status');
@@ -144,7 +174,7 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
   }
 
   async function request(path, { method = 'POST', body } = {}, consume = response => response) {
-    if (closed) throw new Error('closed');
+    if (closed || halted) throw new Error('closed');
     const controller = new AbortControllerImpl();
     requests.add(controller);
     const timeout = timers.setTimeout(() => controller.abort(), 15_000);
@@ -155,10 +185,33 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
       if (!response.ok) {
         const error = new Error('request-failed');
         error.expired = response.status === 401 || response.status === 410;
+        error.code = await safeErrorCode(response);
+        const retry = response.headers?.get('Retry-After');
+        if (/^\d{1,5}$/u.test(retry || '') && Number(retry) > 0 && Number(retry) <= 86_400) error.retryAfter = Number(retry);
         throw error;
       }
       return await consume(response);
     } finally { timers.clearTimeout(timeout); requests.delete(controller); }
+  }
+  async function safeErrorCode(response) {
+    // Read at most 4 KiB and extract only a fixed code. Provider text is never shown or logged.
+    const reader = response.body?.getReader?.();
+    if (!reader) return undefined;
+    const chunks = []; let size = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        size += value.byteLength;
+        if (size > 4096) { await reader.cancel(); return undefined; }
+        chunks.push(value);
+      }
+      const bytes = new Uint8Array(size); let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+      const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      return object(value) && typeof value.code === 'string' && Object.hasOwn(ERROR_MESSAGES, value.code) ? value.code : undefined;
+    } catch { return undefined; }
+    finally { reader.releaseLock(); }
   }
   async function json(path, body) {
     return request(path, { body }, async response => {
@@ -167,12 +220,19 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
       return JSON.parse(content);
     });
   }
-  function failed(error) {
-    if (closed) return;
+  function failed(error, starting = false) {
+    if (closed || halted) return;
     gesture = []; activePointer = null;
-    if (error?.expired || now() >= deadline) { expire(); return; }
+    if (error?.expired) { showExpired(); return; }
+    if (now() >= deadline) { expire(); return; }
+    let message = ERROR_MESSAGES[error?.code];
+    if (error?.code === 'QNH_BROWSER_START_RATE' && error.retryAfter) message = `登录启动过于频繁，请等待${error.retryAfter}秒，关闭此窗口后重新登录。`;
+    if (starting || FATAL_CODES.has(error?.code)) {
+      haltWithMessage(message || '暂时无法打开牵牛花登录，请关闭此窗口后重试。');
+      return;
+    }
     // Never reflect an upstream response, account name, stack, URL or configuration detail.
-    status.textContent = '连接暂时中断，请稍候。若持续无法连接，请关闭后重新登录。';
+    status.textContent = message || '连接暂时中断，请稍候。若持续无法连接，请关闭后重新登录。';
   }
   async function frame() {
     const blob = await request('/api/qnh/login/frame', { method: 'GET' }, async response => {
@@ -195,7 +255,7 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
     status.textContent = '请在上方完成牵牛花登录，登录成功后会自动进入保质期管理。';
   }
   async function run(operation) {
-    if (closed || busy || !started || document.hidden) return false;
+    if (closed || halted || busy || !started || document.hidden) return false;
     if (now() >= deadline) { expire(); return false; }
     setBusy(true);
     try { await operation(); return true; } catch (error) { failed(error); return false; }
@@ -203,10 +263,10 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
   }
   function schedule(delay = 1000) {
     timers.clearTimeout(timer);
-    if (!closed) timer = timers.setTimeout(tick, delay);
+    if (!closed && !halted) timer = timers.setTimeout(tick, delay);
   }
   async function tick() {
-    if (closed) return;
+    if (closed || halted) return;
     if (now() >= deadline) { expire(); return; }
     if (!document.hidden && !busy && !activePointer) {
       await run(async () => {
@@ -300,7 +360,7 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
       started = true;
       status.textContent = '请在上方完成牵牛花登录，登录成功后会自动进入保质期管理。';
       await frame();
-    } catch (error) { failed(error); }
+    } catch (error) { failed(error, true); }
     finally { if (!closed) { setBusy(false); schedule(); } }
   })();
   return Object.freeze({ close: () => finish(), get closed() { return closed; }, get authorized() { return authorized; } });

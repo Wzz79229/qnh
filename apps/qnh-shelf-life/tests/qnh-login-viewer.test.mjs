@@ -235,14 +235,71 @@ test('frame content type and byte limit are enforced before constructing a displ
     () => new Response(new Uint8Array(2_000_001), { headers: { 'Content-Type': 'image/jpeg' } }),
   ]) {
     const app = harness({ fetch(path) { if (path.endsWith('/frame')) return invalid(); } });
-    await settle(); assert.equal(app.created.length, 0); assert.match(app.status(), /连接暂时中断/); app.handle.close();
+    await settle(); assert.equal(app.created.length, 0); assert.match(app.status(), /暂时无法打开牵牛花登录/); app.handle.close();
   }
 });
 
 test('upstream errors and configuration details never appear in the viewer', async () => {
   const app = harness({ fetch(path) { if (path.endsWith('/start')) return new Response('synthetic-secret GITHUB_APP_PRIVATE_KEY', { status: 503 }); } });
   await settle();
-  assert.match(app.status(), /连接暂时中断/);
+  assert.match(app.status(), /暂时无法打开牵牛花登录/);
   assert.doesNotMatch(app.nodes.map(node => node.textContent).join(' '), /synthetic-secret|GITHUB_APP/u);
   assert.equal(app.requestCount('/api/qnh/login/frame'), 0); app.handle.close();
+});
+
+test('safe server codes explain configuration, origin, quota and rate failures without reflecting provider messages', async () => {
+  const cases = [
+    ['QNH_BROWSER_DEMO_LIMIT', 429, /今日手机登录试用额度已用完/],
+    ['QNH_BROWSER_START_RATE', 429, /等待21秒/],
+    ['QNH_BROWSER_ORIGIN_DENIED', 403, /来源校验失败/],
+    ['QNH_BROWSER_NOT_CONFIGURED', 503, /尚未完成配置/],
+    ['QNH_BROWSER_UNAVAILABLE', 502, /连接暂时不可用/],
+  ];
+  for (const [code, status, message] of cases) {
+    const app = harness({ fetch(path) { if (path.endsWith('/start')) return new Response(JSON.stringify({ code, message: 'synthetic-secret https://private.example/' }), { status, headers: { 'Content-Type': 'application/json', 'Retry-After': '21' } }); } });
+    await settle();
+    assert.match(app.status(), message); assert.doesNotMatch(app.status(), /synthetic-secret|private\.example/);
+    assert.equal(app.tag('dialog').open, true); assert.equal(app.handle.closed, false);
+    assert.equal(app.timers.size, 0); assert.equal(app.tag('input').disabled, true);
+    await app.advance(60_000); assert.equal(app.requestCount('/api/qnh/login/start'), 1, 'no automatic session start retries');
+    app.handle.close();
+  }
+});
+
+test('oversized or unknown error bodies cannot supply a visible reason or inject text', async () => {
+  for (const value of [
+    { code: 'UNTRUSTED', message: 'synthetic-secret' },
+    { code: 'QNH_BROWSER_DEMO_LIMIT', message: 'synthetic-secret'.repeat(500) },
+    { code: '__proto__', message: 'synthetic-secret' },
+  ]) {
+    const app = harness({ fetch(path) { if (path.endsWith('/start')) return new Response(JSON.stringify(value), { status: 503 }); } });
+    await settle();
+    assert.match(app.status(), /暂时无法打开牵牛花登录/); assert.doesNotMatch(app.status(), /synthetic-secret|额度|__proto__/);
+    assert.equal(app.timers.size, 0); app.handle.close();
+  }
+});
+
+test('an initial 401 or 410 remains visible instead of deleting the login dialog', async () => {
+  for (const status of [401, 410]) {
+    const app = harness({ fetch(path) { if (path.endsWith('/start')) return new Response('synthetic-secret', { status }); } });
+    await settle();
+    assert.equal(app.handle.closed, false); assert.equal(app.tag('dialog').removed, false); assert.equal(app.tag('dialog').open, true);
+    assert.match(app.status(), /登录会话已结束/); assert.doesNotMatch(app.status(), /synthetic-secret/);
+    assert.equal(app.tag('input').disabled, true); assert.equal(app.button('我已登录').disabled, true);
+    assert.equal(app.requestCount('/api/qnh/login/cancel'), 1); assert.equal(app.closed.length, 0); assert.equal(app.timers.size, 0);
+    await app.advance(60_000); assert.equal(app.requestCount('/api/qnh/login/frame'), 0);
+    app.button('关闭').emit('click'); assert.equal(app.closed.length, 1); assert.equal(app.handle.closed, true);
+    assert.equal(app.requestCount('/api/qnh/login/cancel'), 1);
+  }
+});
+
+test('an expired frame also keeps its explanation visible and clears the last screenshot', async () => {
+  let frames = 0;
+  const app = harness({ fetch(path) {
+    if (path.endsWith('/frame') && ++frames > 1) return new Response('', { status: 401 });
+  } });
+  await settle(); assert.equal(app.created.length, 1); await app.advance(1000);
+  assert.equal(app.handle.closed, false); assert.match(app.status(), /登录会话已结束/);
+  assert.deepEqual(app.revoked, app.created); assert.equal(app.tag('img').src, ''); assert.equal(app.timers.size, 0);
+  app.handle.close();
 });

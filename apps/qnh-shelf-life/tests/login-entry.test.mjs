@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import * as core from '../dist/core.mjs';
 import { CloudStore } from '../dist/cloud.mjs';
 import { ConflictError } from '../dist/github.mjs';
+import { openQnhLoginViewer } from '../dist/qnh-login-viewer.mjs';
 
 // Run the actual app against a minimal document and the real CloudStore protocol.
 // No browser profile, production service, credentials, or stored data are used.
@@ -21,10 +22,27 @@ function element() {
     contains: name => classes.has(name), remove: name => classes.delete(name),
   } };
 }
-function harness({ session = { configured: true, authorized: false, loginMethod: 'qnh_pending' }, stateResponse, logoutResponse, search = '', url = 'https://app.example/' } = {}) {
+function harness({ session = { configured: true, authorized: false, loginMethod: 'qnh_pending' }, stateResponse, logoutResponse, search = '', url = 'https://app.example/', realViewer = false } = {}) {
   const selectors = new Map(['#main', '.desktop-nav', '.bottom-nav', '#page-label', '#sync-pill', '#user-avatar', '#toast'].map(key => [key, element()]));
   const body = element(), listeners = new Map(), windowListeners = new Map(), calls = [], redirects=[];
   const pageUrl=new URL(url);if(search)pageUrl.search=search;
+  const viewerNodes=[];
+  function makeViewerElement(tagName){
+    const attributes=new Map(),events=new Map();
+    const node={tagName,children:[],textContent:'',value:'',open:false,removed:false,disabled:false,
+      setAttribute(name,value){attributes.set(name,String(value));if(name==='id')this.id=String(value);},
+      getAttribute:name=>attributes.get(name)??null,
+      removeAttribute(name){attributes.delete(name);},
+      append(...nodes){this.children.push(...nodes);},
+      addEventListener(name,callback){if(!events.has(name))events.set(name,new Set());events.get(name).add(callback);},
+      removeEventListener(name,callback){events.get(name)?.delete(callback);},
+      emit(name,event={}){for(const callback of events.get(name)||[])callback({preventDefault(){},...event});},
+      showModal(){this.open=true;},
+      close(){this.open=false;this.emit('close');},
+      remove(){this.removed=true;},
+    };viewerNodes.push(node);return node;
+  }
+  body.children=[];body.append=(...nodes)=>body.children.push(...nodes);
   const dialogs = new Map();
   const makeDialog = (id, html='', open=false) => {
     const handlers = new Map();
@@ -51,6 +69,9 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
       return result;
     }
     if(path === '/api/state')return stateResponse ? await stateResponse() : json({ data, sha: 'test-sha' });
+    if(path === '/api/qnh/login/start')return json({authorized:false,loginMethod:'qnh_browser',status:'login',viewport:{width:1280,height:900},expiresAt:Date.now()+180000});
+    if(path === '/api/qnh/login/frame')return new Response(new Uint8Array([255,216,255,217]),{headers:{'Content-Type':'image/jpeg'}});
+    if(path === '/api/qnh/login/cancel')return json({});
     throw new Error(`Unexpected request ${path}`);
   };
   const document = {
@@ -58,6 +79,8 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
     querySelector: selector => selectors.get(selector) || dialogs.get(selector.slice(1)) || null,
     querySelectorAll: selector => selector==='dialog'?[...dialogs.values()]:selector==='dialog[open]'?[...dialogs.values()].filter(dialog=>dialog.open):[],
     addEventListener: (name, handler) => listeners.set(name, handler),
+    removeEventListener(name,handler){if(listeners.get(name)===handler)listeners.delete(name);},
+    createElement:makeViewerElement,
   };
   const context = vm.createContext({ ...core, ConflictError,
     CloudStore: class extends CloudStore { constructor(base) { super(base, fetchImpl); } },
@@ -68,6 +91,7 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
     openSkuFlow() { skuFlows++; },
     openQnhLoginViewer(callbacks) {
       viewerOpens++;viewerCallbacks=callbacks;
+      if(realViewer)return openQnhLoginViewer(callbacks,{document,fetch:fetchImpl,timers:{setTimeout:()=>0,clearTimeout(){}},URL:{createObjectURL:()=> 'blob:synthetic-frame',revokeObjectURL(){}},AbortController});
       let closed=false;
       return { close() { if(!closed){closed=true;viewerCloses++;} } };
     },
@@ -85,6 +109,7 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
     setSession(value) { activeSession=value; },
     viewerOpens: () => viewerOpens,
     viewerCloses: () => viewerCloses,
+    viewerNodes,
     authorizeViewer: () => viewerCallbacks?.onAuthorized(),
     closeViewer: () => viewerCallbacks?.onClose(),
     emitWindow: name => windowListeners.get(name)?.({ type: name }),
@@ -120,6 +145,23 @@ test('the inline login button waits for an explicit available server integration
   assert.equal(app.viewerOpens(),1);
   assert.equal(app.viewerCloses(),0,'opening must not immediately destroy the modal');
   assert.equal(app.calls.some(call=>call.path==='/api/state'),false);
+});
+
+test('the actual viewer module stays open through delegated app click, online and visibility events', async () => {
+  const app=harness({realViewer:true,session:{configured:true,authorized:false,loginMethod:'qnh_browser',loginAvailable:true}});await app.settle();
+  await app.click('qnh-login');
+  for(let turn=0;turn<15;turn++)await new Promise(resolve=>setImmediate(resolve));
+  const dialog=app.viewerNodes.find(node=>node.id==='qnh-login-viewer');
+  assert.ok(dialog,'delegated click must append the real modal');
+  assert.equal(dialog.open,true);assert.equal(dialog.removed,false);
+  assert.equal(app.calls.filter(call=>call.path==='/api/qnh/login/start').length,1);
+  assert.equal(app.calls.filter(call=>call.path==='/api/qnh/login/frame').length,1);
+  app.emitWindow('online');app.emitDocument('visibilitychange');
+  assert.equal(dialog.open,true);assert.equal(dialog.removed,false);
+  assert.equal(app.calls.some(call=>call.path==='/api/qnh/login/cancel'),false);
+  await app.click('auto-connect');await app.settle();
+  assert.equal(dialog.removed,true);
+  assert.equal(app.calls.filter(call=>call.path==='/api/qnh/login/cancel').length,1);
 });
 
 test('opening or closing the inline login and returning to the app cannot grant access', async () => {
