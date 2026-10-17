@@ -1,11 +1,11 @@
 /* Cache only the published application shell. Business data and credentials never enter this cache. */
 const CACHE_PREFIX = 'xianqi-shell-';
-const CACHE_NAME = `${CACHE_PREFIX}v10-official-login-window`;
+const CACHE_NAME = `${CACHE_PREFIX}v11-inline-qnh-login`;
 const SHELL = [
   './', './index.html', './styles.css', './app.mjs', './core.mjs', './github.mjs',
   './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png',
   './icons/icon-512.png', './icons/maskable-512.png',
-  './cloud.mjs', './connection.json', './photo-flow.mjs', './photo-parser.mjs', './photo-sync.mjs', './ocr.mjs', './catalog.mjs', './sku-flow.mjs', './sku-query.mjs',
+  './cloud.mjs', './connection.json', './photo-flow.mjs', './photo-parser.mjs', './photo-sync.mjs', './ocr.mjs', './catalog.mjs', './sku-flow.mjs', './sku-query.mjs', './qnh-login-viewer.mjs',
 ];
 // OCR models are cached only after first use, rather than forcing a large initial install.
 const OCR = ['./vendor/tesseract/recognize.worker.js','./vendor/tesseract/tesseract.min.js','./vendor/tesseract/worker.min.js',

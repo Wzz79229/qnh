@@ -1,6 +1,7 @@
 name = "qnh-shelf-life-api"
 main = "worker.mjs"
 compatibility_date = "2026-10-15"
+compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 preview_urls = false
 # Preserve administrator-managed runtime App IDs during GitHub-triggered builds.
@@ -9,6 +10,23 @@ keep_vars = true
 [vars]
 ALLOWED_ORIGIN = "https://wzz79229.github.io"
 MEMBER_AUTH_MODE = "qnh"
+QNH_TENANT_MODE = "per_tenant"
+QNH_BROWSER_ALLOWED_DOMAINS = "qnh.meituan.com,*.meituan.com,*.meituan.net,*.sankuai.com,*.dianping.com"
+
+[browser]
+binding = "BROWSER"
+
+[[durable_objects.bindings]]
+name = "QNH_PHONE_SESSIONS"
+class_name = "QnhPhoneSession"
+
+[[durable_objects.bindings]]
+name = "QNH_BROWSER_BUDGET"
+class_name = "QnhBrowserBudget"
+
+[[migrations]]
+tag = "qnh-phone-login-v1"
+new_sqlite_classes = ["QnhPhoneSession", "QnhBrowserBudget"]
 
 # Optional same-origin PWA hosting avoids mobile third-party-cookie restrictions.
 # The deployed bundle includes imported ../dist/core.mjs and ../dist/github.mjs.
@@ -19,5 +37,5 @@ run_worker_first = ["/api/*"]
 
 # GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY are runtime
 # settings. QNH_CONNECTOR_KEY is only for the local bridge. Never put values here.
-# QNH phone-session verification is not connected yet. Keep qnh mode closed until
-# this phone's live product access and intended tenant are verified by the server.
+# Tenant identity comes only from this phone's verified QNH session. No fixed tenant.
+# Browser time is hard capped to an 8-minute daily trial; no paid plan is enabled.

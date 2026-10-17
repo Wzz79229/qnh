@@ -3,10 +3,14 @@ import { sanitizeState } from '../dist/core.mjs';
 import { CatalogStore, CatalogStoreError } from './catalog-store.mjs';
 import { QnhQueryQueue, QnhQueryError, QNH_QUERY_PATH } from './qnh-query.mjs';
 import { createGitHubAuthorization, validateGitHubAuthorization, GitHubAuthorizationError } from './github-app.mjs';
+import { createQnhPhoneRouter } from './qnh-phone-router.mjs';
+import { clearQnhPhoneCookie, QnhBrowserError } from './qnh-browser-session.mjs';
+export { QnhPhoneSession, QnhBrowserBudget } from './qnh-phone-router.mjs';
 
 // There is deliberately no client-supplied GitHub owner, repository, branch, or URL.
 const TARGET = Object.freeze({ owner: 'Wzz79229', repo: 'bzq', branch: 'main', path: 'data/shelf-life.json' });
 const PAGES_ORIGIN = 'https://wzz79229.github.io';
+const PRIMARY_ORIGIN = 'https://qnh-shelf-life-api.w792294944.workers.dev';
 const API_ROOT = 'https://api.github.com/repos/Wzz79229/bzq';
 const COOKIE = '__Host-fresh-period-session';
 const SESSION_SECONDS = 30 * 24 * 60 * 60;
@@ -308,8 +312,10 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
     catch { throw new ApiError(502, 'INVALID_STORED_PHOTO', 'GitHub 中的照片文件格式无效，请联系管理员。'); }
   }
 
-  async function dataStore(env) {
-    return new GitHubStore({ ...TARGET, token: await githubToken(env), timeoutMs: 20_000 }, repositoryFetch);
+  async function dataStore(env, tenantId = null) {
+    if (tenantId !== null && (typeof tenantId !== 'string' || !/^[1-9][0-9]{0,19}$/.test(tenantId))) throw new ApiError(401, 'AUTH_REQUIRED', '请重新登录牵牛花。');
+    const path = tenantId === null ? TARGET.path : `data/tenants/${tenantId}/shelf-life.json`;
+    return new GitHubStore({ ...TARGET, path, token: await githubToken(env), timeoutMs: 20_000 }, repositoryFetch);
   }
 
   async function queryQueue(env) {
@@ -352,6 +358,11 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
         const bridgeRoute = ['/api/qnh/bridge/claim', '/api/qnh/bridge/result'].includes(url.pathname);
         if (!bridgeRoute) checkOrigin(request, mutations || request.method === 'OPTIONS');
         const env = configuration(rawEnv);
+        const phone = createQnhPhoneRouter(env, { origin: PRIMARY_ORIGIN, now, cryptoImpl });
+        if (qnhLoginRequired(env) && url.pathname.startsWith('/api/qnh/login/')) {
+          const handled = await phone.handle(request);
+          if (handled) return handled;
+        }
         const methods = new Map([
           ['/api/session', ['GET']], ['/api/login', ['POST']], ['/api/logout', ['POST']],
           ['/api/state', ['GET', 'PUT']], ['/api/photos', ['POST']],
@@ -386,7 +397,10 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
           return new Response(null, { status: 204, headers });
         }
         if (!supported.includes(request.method)) throw new ApiError(405, 'METHOD_NOT_ALLOWED', '不支持此请求方式。', { Allow: supported.join(', ') });
-        const active = await authorized(request, env);
+        const phoneStatus = url.pathname !== '/api/logout' && qnhLoginRequired(env) && phone.configured ? await phone.status(request) : null;
+        const active = url.pathname === '/api/logout' ? false : phoneStatus
+          ? phoneStatus.authorized === true && typeof phoneStatus.tenantId === 'string' && /^[1-9][0-9]{0,19}$/.test(phoneStatus.tenantId)
+          : await authorized(request, env);
         if (url.pathname === '/api/session') {
           if (!qnhLoginRequired(env)) return json(request, { configured: true, authorized: active, loginMethod: 'legacy' });
           const appMode = validateGitHubAuthorization(env).mode === 'app';
@@ -397,6 +411,11 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
               ...(readiness.upstreamStatus === null ? {} : { githubAuthorizationStatus: readiness.upstreamStatus }),
               message: 'GitHub 仓库授权验证未通过，请管理员检查 App 安装范围、权限和私钥。' }, 503, { 'Retry-After': '30' });
           }
+          if (phone.configured) return json(request, { configured: true, authorized: active,
+            loginMethod: 'qnh_browser', loginAvailable: true,
+            ...(active ? { tenantId: phoneStatus.tenantId } : {}),
+            ...(appMode ? { githubAuthorization: 'ready' } : {}),
+            message: active ? '牵牛花已登录。' : '请在鲜期内登录牵牛花。' });
           return json(request, { configured: true, authorized: false, loginMethod: 'qnh_pending',
             ...(appMode ? { githubAuthorization: 'ready' } : {}), message: '牵牛花手机登录连接尚未接通，暂不能进入保质期管理。' });
         }
@@ -418,12 +437,32 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
           failures.delete(ip);
           return json(request, { configured: true, authorized: true }, 200, { 'Set-Cookie': cookie(await makeSession(env.SESSION_SECRET)) });
         }
-        if (url.pathname === '/api/logout') return json(request, { configured: true, authorized: false }, 200, { 'Set-Cookie': cookie('', true) });
+        if (url.pathname === '/api/logout') {
+          if (qnhLoginRequired(env) && phone.configured) {
+            await phone.cancel(request);
+            return json(request, { configured: true, authorized: false, loginMethod: 'qnh_browser' }, 200, { 'Set-Cookie': clearQnhPhoneCookie() });
+          }
+          return json(request, { configured: true, authorized: false }, 200, { 'Set-Cookie': cookie('', true) });
+        }
         if (!active) {
+          if (qnhLoginRequired(env) && phone.configured) throw new ApiError(401, 'AUTH_REQUIRED', '请先在鲜期内登录牵牛花。');
           if (qnhLoginRequired(env)) throw new ApiError(503, 'QNH_LOGIN_NOT_CONNECTED', '牵牛花员工手机登录尚未接通，暂不能读取或保存批次。');
           throw new ApiError(401, 'AUTH_REQUIRED', '请先输入团队访问密码。');
         }
+        // New phone sessions never read shared historical catalogs or photos.
+        // Batches are isolated by the trusted server-side tenant, not client fields.
+        if (phoneStatus && (url.pathname.startsWith('/api/catalog') || url.pathname.startsWith('/api/photos'))) {
+          throw new ApiError(404, 'NOT_FOUND', '当前流程仅保存批次日期和件数。');
+        }
         if (url.pathname === '/api/qnh/queries' || queryMatch) {
+          if (qnhLoginRequired(env) && phone.configured) {
+            if (queryMatch) throw new ApiError(404, 'NOT_FOUND', '此查询已结束，请重新扫描 SKU。');
+            const input = await readJSON(request, 1_024);
+            exactKeys(input, ['sku']);
+            if (typeof input.sku !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/.test(input.sku.trim())) throw new ApiError(400, 'INVALID_SKU', '请扫描完整的 SKU 码。');
+            const sku = input.sku.trim();
+            return json(request, { ...await phone.lookup(request, sku), mode: 'direct', sku });
+          }
           connectorKey(env);
           const queue = await queryQueue(env);
           if (queryMatch) return json(request, await queue.get(queryMatch[1]));
@@ -469,7 +508,7 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
           if (!result.payload?.content?.sha) throw new ApiError(502, 'SAVE_UNCONFIRMED', '无法确认照片上传结果，请保留草稿并重试。');
           return json(request, { id: input.id, path: `photos/${input.id}.jpg` }, 201);
         }
-        const store = await dataStore(env);
+        const store = await dataStore(env, phoneStatus ? phoneStatus.tenantId : null);
         if (request.method === 'GET') {
           const snapshot = await store.read();
           return json(request, { data: snapshot.data === null ? null : cleanState(snapshot.data), sha: snapshot.sha });
@@ -480,6 +519,7 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
           throw new ApiError(400, 'EXPECTED_SHA_REQUIRED', '请先拉取云端数据版本再保存。');
         }
         const data = cleanState(input.data);
+        if (phoneStatus && photoRefs(data).size) throw new ApiError(400, 'INVALID_PHOTOS', '识别照片不上传或保存，请只保存批次数据。');
         const current = await store.read();
         if (current.sha !== input.expectedSha) throw new ConflictError();
         const previousRefs = current.data === null ? new Map() : photoRefs(cleanState(current.data));
@@ -494,6 +534,7 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
         if (error instanceof ApiError) return json(request, { code: error.code, message: error.message }, error.status, error.headers);
         if (error instanceof CatalogStoreError) return json(request, { code: error.code, message: error.message }, error.status);
         if (error instanceof QnhQueryError) return json(request, { code: error.code, message: error.message }, error.status);
+        if (error instanceof QnhBrowserError) return json(request, { code: error.code, message: error.message }, error.status);
         if (error instanceof ConflictError) return json(request, { code: 'CONFLICT', message: '其他成员已修改数据，请保留本机草稿，拉取最新数据后再保存。' }, 409);
         if (error instanceof GitHubError) {
           const status = error.code === 'RATE_LIMITED' ? 429 : error.code === 'TIMEOUT' ? 504 : error.code === 'DATA_TOO_LARGE' ? 413 : 502;

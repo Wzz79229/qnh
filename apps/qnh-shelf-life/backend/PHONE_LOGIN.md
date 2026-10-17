@@ -1,0 +1,25 @@
+# 鲜期内的牵牛花登录（限时试用）
+
+员工在鲜期内打开官方页面的云端画面，亲自完成账号、密码及验证码操作。没有外部跳转、共用团队口令或 GitHub 账号步骤。当前方案需要 Cloudflare Browser Run；不是直接在 iframe 中读取其他网站的 Cookie。
+
+## 租户与数据
+
+`QNH_TENANT_MODE=per_tenant`。租户编号只从当前手机独立的官方牵牛花商品页取得，不能由客户端参数、URL、表单或请求头选择。服务端查询当前页面的一个实际 SKU，要求新的、未缓存的官方商品 JSON 与可见 SKU/商品名对应，并在查询前后核对租户；成功后绑定这个会话的租户。切换租户必须重新登录。
+
+批次路径固定为私有 `Wzz79229/bzq` 的 `data/tenants/<已验证租户编号>/shelf-life.json`。不同租户使用不同文件，不读取或迁移旧共享 `data/shelf-life.json`。文件首次不存在时，已授权成员进入空工作区；第一个确认的批次用 `expectedSha:null` 创建文件，读取接口不会自动写入。新流程不提供旧商品库或照片接口，包装照片继续只在本机 OCR。
+
+## 会话和凭据
+
+每台手机持有随机 256 位 HttpOnly、Secure、SameSite=Strict Cookie，由 Worker 选择独立的 Durable Object。手机只接收 JPEG 画面和有限输入接口，不获得 CDP、Live View URL、浏览器 ID 或 Cloudflare/GitHub 凭据。所有登录 API 同源，写请求检查 Origin，GET 画面检查 Fetch metadata。
+
+密码、验证码、截图及牵牛花 Cookie 不写入 GitHub、KV、R2 或 DO 存储，不记录请求正文。DO 只持久化不含登录能力的限额、截止时间和退休标记。释放或驱逐后不能恢复旧 Cookie 的授权。关闭录制；页面输入只允许受限文字、指针和白名单按键。
+
+## 免费试用边界
+
+全 App 每 UTC 日最多两次启动，各保守计入 4 分钟，合计 8 分钟；失败启动也计入，不能退款。两次之间至少 21 秒，同时最多两个窗口。每次登录窗口最多 3 分钟，会话最多 3 分 45 秒，另留关闭余量。绝对截止与 alarm 清理之外，还有浏览器短闲置超时后备。此容量用于验证内置登录，不能作为门店日常多人使用的容量承诺；本改动不启用付费套餐。
+
+## 部署和验收
+
+Wrangler 声明 BROWSER、QNH_PHONE_SESSIONS 与 QNH_BROWSER_BUDGET 两个 SQLite DO，不需要新的 Cloudflare API token。原管理员 GitHub App Secret 继续由运行时保存，keep_vars 保留现有授权配置。旧 Pages 入口会转到同一个鲜期 Worker 主域，避免手机跨站 Cookie 问题。
+
+本地协议测试不等于真实登录成功。仍须现场确认云端官方页面可用，并由员工本人在鲜期窗口完成登录，验证实际租户、即时 SKU 查询、首次保存与另一租户隔离后，才可认定端到端验收完成。

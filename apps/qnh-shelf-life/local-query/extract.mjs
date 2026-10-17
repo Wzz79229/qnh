@@ -37,7 +37,7 @@ export function sanitizeProduct(input, expectedSku) {
     sku, spu, name: text(input.name, 200, true), spec: text(input.spec, 120),
     category: text(input.category, 200), barcodes, imageUrl: safeImageUrl(input.imageUrl),
   };
-  if (Buffer.byteLength(JSON.stringify(product), 'utf8') > 8192) throw new TypeError('INVALID_PRODUCT');
+  if (new TextEncoder().encode(JSON.stringify(product)).byteLength > 8192) throw new TypeError('INVALID_PRODUCT');
   return product;
 }
 

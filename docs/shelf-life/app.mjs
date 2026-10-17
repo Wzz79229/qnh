@@ -3,6 +3,7 @@ import { ConflictError } from './github.mjs';
 import { CloudStore } from './cloud.mjs';
 import { openPhotoFlow, validateBatchQuantity } from './photo-flow.mjs';
 import { openSkuFlow } from './sku-flow.mjs';
+import { openQnhLoginViewer } from './qnh-login-viewer.mjs';
 import { lookupSku } from './sku-query.mjs';
 import { previewByteLength } from './ocr.mjs';
 import { syncPhotoState } from './photo-sync.mjs';
@@ -21,6 +22,7 @@ let store = null, sha = null, connected = false, dirty = false, busy = false, de
 let installPrompt = null, toastTimer;
 let config = {owner:'Wzz79229',repo:'bzq',branch:'main',path:'data/shelf-life.json',actor:'团队成员'};
 let connectionIssue = '', needsLogin = false, loginMethod = '', sessionChecked = false, logoutPending = null;
+let qnhLoginAvailable = false, qnhViewer = null, qnhViewerOpening = false, qnhViewerGeneration = 0;
 const pendingPhotos = new Map();
 const workspaceOpen = () => demo || connected;
 function loginIssue(error) {
@@ -42,11 +44,31 @@ function loginHTML() {
   const pending = loginMethod==='qnh_pending';
   const message = leaving?'正在退出登录…':checking?'正在检查登录状态…':connectionIssue||(pending?'牵牛花登录连接尚未接通。':'暂时无法登录，请稍后重试。');
   const legacyForm = !checking && !logoutPending && needsLogin && loginMethod==='legacy';
-  const officialLogin = !checking && !logoutPending && pending;
-  return `<section class="login-screen" aria-labelledby="login-title"><div class="login-card"><span class="login-mark">${icon('leaf')}</span><p class="login-brand">鲜期 · 保质期管理</p><h1 id="login-title">登录牵牛花</h1><p class="login-intro">${officialLogin?'先在牵牛花官方页面登录。':'正在准备保质期管理。'}</p>${legacyForm?`<form id="team-login-form"><label class="field"><span>团队访问口令</span><input name="password" type="password" required autocomplete="current-password"></label><button class="button primary login-button" type="submit">登录团队</button></form>`:officialLogin?'<a class="button primary login-button" href="https://qnh.meituan.com/" target="_blank" rel="noopener noreferrer">打开牵牛花登录</a>':`<button class="button primary login-button" type="button" disabled>${leaving?'正在退出登录…':checking?'正在检查登录…':'登录牵牛花'}</button>`}<p class="login-status" role="status" aria-live="polite">${e(message)}</p>${officialLogin?'<p class="login-note">官网会在新窗口打开。登录后自动进入保质期管理尚未接通。</p>':''}${!checking?`<button class="text-button login-retry" data-action="auto-connect">${icon('refresh')}重新检查</button>`:''}</div></section>`;
+  const inlineLogin = !checking && !logoutPending && loginMethod==='qnh_browser' && qnhLoginAvailable;
+  return `<section class="login-screen" aria-labelledby="login-title"><div class="login-card"><span class="login-mark">${icon('leaf')}</span><p class="login-brand">鲜期 · 保质期管理</p><h1 id="login-title">登录牵牛花</h1><p class="login-intro">登录完成后，自动进入保质期管理。</p>${legacyForm?`<form id="team-login-form"><label class="field"><span>团队访问口令</span><input name="password" type="password" required autocomplete="current-password"></label><button class="button primary login-button" type="submit">登录团队</button></form>`:`<button class="button primary login-button" type="button" ${inlineLogin?'data-action="qnh-login"':'disabled'}>${leaving?'正在退出登录…':checking?'正在检查登录…':'登录牵牛花'}</button>`}<p class="login-status" role="status" aria-live="polite">${e(message)}</p>${inlineLogin?'<p class="login-note">在鲜期中完成登录，无需切换页面。</p>':''}${!checking?`<button class="text-button login-retry" data-action="auto-connect">${icon('refresh')}重新检查</button>`:''}</div></section>`;
+}
+function closeQnhLoginViewer() {
+  qnhViewerGeneration++;qnhViewerOpening=false;
+  const viewer=qnhViewer;qnhViewer=null;viewer?.close();
+}
+async function beginQnhLogin() {
+  if(busy||demo||connected||logoutPending||loginMethod!=='qnh_browser'||!qnhLoginAvailable||qnhViewer||qnhViewerOpening)return;
+  const generation=++qnhViewerGeneration;qnhViewerOpening=true;
+  const clear=()=>{qnhViewer=null;qnhViewerOpening=false;qnhViewerGeneration++;};
+  try {
+    const viewer=await openQnhLoginViewer({
+      onAuthorized:()=>{if(generation!==qnhViewerGeneration)return;clear();return autoConnect();},
+      onClose:()=>{if(generation===qnhViewerGeneration)clear();},
+    });
+    if(generation!==qnhViewerGeneration)viewer?.close();
+    else{qnhViewer=viewer;qnhViewerOpening=false;}
+  }catch{
+    if(generation!==qnhViewerGeneration)return;
+    clear();connectionIssue='暂时无法打开牵牛花登录，请稍后重试。';render();
+  }
 }
 function scanHTML() {
-  return heading('扫描 SKU 建档','每次从牵牛花查询商品，再记录生产日期、保质期和件数。','','SCAN AND RECORD')+banners()+  '<section class="card scan-intro"><span class="panel-eyebrow">SKU → 生产日期 → 件数</span><h2>一扫查商品，一拍识日期</h2><ol class="step-list"><li><b>扫描 SKU 码</b>实时查询牵牛花，核对商品名称、规格和图片。</li><li><b>拍生产日期与保质期</b>照片只在本机识别，不上传、不保存。</li><li><b>清点并填写件数</b>同一个 SKU 的不同生产日期，分别建立批次。</li><li><b>自动计算到期日期</b>核对识别结果和件数后保存到团队。</li></ol><button class="button primary" data-action="add">'+icon('camera')+'扫描 SKU 开始</button><p class="form-note">实时查询需要电脑上的查询程序运行，并保持牵牛花登录。查询失败时不会用旧商品库代替。</p></section>';
+  return heading('扫描 SKU 建档','每次从牵牛花查询商品，再记录生产日期、保质期和件数。','','SCAN AND RECORD')+banners()+  '<section class="card scan-intro"><span class="panel-eyebrow">SKU → 生产日期 → 件数</span><h2>一扫查商品，一拍识日期</h2><ol class="step-list"><li><b>扫描 SKU 码</b>实时查询牵牛花，核对商品名称、规格和图片。</li><li><b>拍生产日期与保质期</b>照片只在本机识别，不上传、不保存。</li><li><b>清点并填写件数</b>同一个 SKU 的不同生产日期，分别建立批次。</li><li><b>自动计算到期日期</b>核对识别结果和件数后保存到团队。</li></ol><button class="button primary" data-action="add">'+icon('camera')+'扫描 SKU 开始</button><p class="form-note">实时查询需要保持牵牛花登录有效。查询失败时不会用旧商品库代替。</p></section>';
 }
 
 function records() { return state.records.filter(r => !r.deletedAt); }
@@ -147,7 +169,9 @@ function render(preserveFocus=false) {
   if(preserveFocus){const el=document.activeElement;if(el?.id==='search'){position=el.selectionStart;focus=el.id;}}
   updateChrome();
   if(!workspaceOpen()){
+    closeQnhLoginViewer();
     for(const dialog of document.querySelectorAll('dialog')){
+      if(dialog.id==='qnh-login-viewer')continue;
       if(dialog.open)dialog.close();
       // Run photo/camera close cleanup even for a dialog already closed, then
       // discard its contents and old callbacks before another user can enter.
@@ -217,18 +241,28 @@ async function refresh(silent=false,discard=false) {
   finally{busy=false;if(workspaceOpen())updateChrome();else render();}
 }
 async function autoConnect(password) {
-  if(busy||demo||password&&loginMethod!=='legacy')return;busy=true;render();
+  if(busy||demo||password&&loginMethod!=='legacy')return;qnhLoginAvailable=false;busy=true;render();
   try {
     if(logoutPending){await logoutPending.logout();logoutPending=null;}
     if(!store){const response=await fetch('./connection.json',{cache:'no-store'});if(!response.ok)throw new Error('无法读取团队连接设置。');const settings=await response.json();store=new CloudStore(settings.apiBase);}
     if(password)await store.login(password);
     const session=await store.session();
     loginMethod=session.loginMethod||'';
+    qnhLoginAvailable=loginMethod==='qnh_browser'&&session.loginAvailable===true;
+    // The phone session and its login viewer share the Worker origin. Upgrade
+    // the old public Pages entry without accepting a redirect URL from data.
+    if(qnhLoginAvailable&&location.origin==='https://wzz79229.github.io'&&/^\/qnh\/shelf-life(?:\/|$)/.test(location.pathname)){
+      qnhLoginAvailable=false;connected=false;connectionIssue='正在打开鲜期登录…';
+      location.replace('https://qnh-shelf-life-api.w792294944.workers.dev/');return;
+    }
     if(loginMethod==='qnh_pending'){needsLogin=false;connected=false;connectionIssue='牵牛花登录连接尚未接通。';return;}
     needsLogin=session.authorized!==true&&loginMethod==='legacy';
-    if(session.authorized!==true){connectionIssue=needsLogin?'请先登录团队。':'牵牛花登录连接尚未接通。';connected=false;return;}
-    const incoming=await store.read();if(!incoming.data)throw new Error('团队数据文件尚未初始化。');
-    const remote=sanitizeState(incoming.data);let shouldSave=false;
+    if(session.authorized!==true){connectionIssue=needsLogin?'请先登录团队。':qnhLoginAvailable?'请在鲜期内登录牵牛花。':'牵牛花登录连接尚未接通。';connected=false;return;}
+    const incoming=await store.read();
+    if(!incoming.data&&!(incoming.data===null&&incoming.sha===null))throw new Error('团队数据文件格式无法确认。');
+    // An authorized first read of an absent file is an empty workspace. The
+    // first confirmed batch creates it with expectedSha:null; GET never writes.
+    const remote=incoming.data===null?emptyState():sanitizeState(incoming.data);let shouldSave=false;
     if(dirty){
       if(sha&&sha!==incoming.sha){connected=true;throw new ConflictError();}
       const remoteById=new Map(remote.records.map(r=>[r.id,r]));
@@ -285,7 +319,7 @@ document.addEventListener('click',async ev=>{
   if(b.dataset.close){closeDialog(`#${b.dataset.close}`);return;}
   if(b.dataset.page){go(b.dataset.page);return;}
   const action=b.dataset.action;if(!action)return;
-  if(!workspaceOpen()&&!['auto-connect','install'].includes(action))return;
+  if(!workspaceOpen()&&!['auto-connect','qnh-login','install'].includes(action))return;
   if(busy&&!['export-json','export-csv','export-xlsx','team','install'].includes(action)){notify('正在同步，请稍候');return;}
   const r=state.records.find(item=>item.id===b.dataset.id);
   if(action==='add')recordDialog();
@@ -297,6 +331,7 @@ document.addEventListener('click',async ev=>{
   else if(action==='team')go('team');
   else if(action==='import')recordDialog();
   else if(action==='auto-connect')autoConnect();
+  else if(action==='qnh-login')await beginQnhLogin();
   else if(action==='handle'&&r)handleRecord(r);
   else if(action==='restore'&&r){if(await confirmAction('恢复为在管批次',`将 ${r.name} 恢复为在管状态，并重新参与临期提醒。`,'恢复在管')){r.status='active';r.handledReason='';r.handledAt='';r.updatedAt=now();await changed('已恢复为在管批次');}}
   else if(action==='delete'&&r){if(await confirmAction('移除商品批次',`将 ${r.name} 从在管清单移除。可在“已移除”筛选中恢复，GitHub 历史也会保留。`,'移除批次',true)){r.deletedAt=now();r.updatedAt=now();closeDialog('#record-dialog');await changed('批次已移除，可恢复');}}
@@ -308,7 +343,7 @@ document.addEventListener('click',async ev=>{
     // Lock and erase the local workspace before any network operation. A failed
     // remote logout is retried before the next session check, never as access.
     logoutPending=store;store=null;connected=false;demo=false;sha=null;state=emptyState();pendingPhotos.clear();dirty=false;errorText='';lastSync='';needsLogin=false;busy=true;page='overview';filter='all';search='';category='';limit=60;render();
-    try{await logoutPending?.logout();logoutPending=null;needsLogin=loginMethod==='legacy';connectionIssue=needsLogin?'请先登录团队。':'牵牛花登录连接尚未接通。';notify('已退出团队');}
+    try{await logoutPending?.logout();logoutPending=null;needsLogin=loginMethod==='legacy';connectionIssue=needsLogin?'请先登录团队。':qnhLoginAvailable?'请在鲜期内登录牵牛花。':'牵牛花登录连接尚未接通。';notify('已退出团队');}
     catch{connectionIssue='本机已退出，账号退出尚未完成，请检查网络后重新检查。';notify(connectionIssue,true);}
     finally{busy=false;render();}
   }

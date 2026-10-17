@@ -1,42 +1,32 @@
-# GitHub App 后台授权与牵牛花员工身份
+# 鲜期后台与牵牛花内置登录
 
-后台已支持管理员一次安装 GitHub App，仅读写私有 Wzz79229/bzq。配置见 [GITHUB_APP_SETUP.md](GITHUB_APP_SETUP.md)。GitHub App 不等于员工身份认证；员工手机必须直接登录牵牛花这一要求尚未接通。
+管理员 GitHub App 授权继续使用既有配置，仅读写私有 Wzz79229/bzq。员工不需要 GitHub 账号、个人令牌或额外团队口令。授权说明见 [GITHUB_APP_SETUP.md](GITHUB_APP_SETUP.md)。
 
-## 当前部署配置
+当前手机登录、会话隔离、租户范围、额度与真实验收要求，以 [PHONE_LOGIN.md](PHONE_LOGIN.md) 为准。
 
-- Worker: qnh-shelf-life-api，同域 PWA: https://qnh-shelf-life-api.w792294944.workers.dev/
+## 当前流程
+
+鲜期内显示官方牵牛花云端页面，员工本人完成登录。服务端确认新的商品访问结果并绑定实际登录租户后，读取该租户批次；数据读取成功才进入管理页。打开页面、返回鲜期或客户端标记均不能授予权限。旧 Pages 入口切至同一个鲜期主域。
+
+QNH_TENANT_MODE=per_tenant，不预设租户，也不接受客户端选择租户。批次固定到 bzq/main:data/tenants/<可信租户编号>/shelf-life.json，隔离读写。历史 data/shelf-life.json 不自动读取或迁移；新手机流程不提供旧商品库和照片接口。
+
+## 部署
+
+- Worker: qnh-shelf-life-api，主入口 https://qnh-shelf-life-api.w792294944.workers.dev/
 - Git Build 根目录: apps/qnh-shelf-life/backend；部署命令: npx wrangler deploy。
-- 构建命令仍将部署产物 ../dist/connection.json 的 apiBase 改为 /。
-- ALLOWED_ORIGIN 固定 https://wzz79229.github.io；MEMBER_AUTH_MODE 固定 qnh。
-- 运行时变量: GITHUB_APP_ID、GITHUB_APP_INSTALLATION_ID；运行时 Secret: GITHUB_APP_PRIVATE_KEY。
-- 本机桥接另外需要 QNH_CONNECTOR_KEY；无需密钥的电脑试查入口不受影响。
+- 构建命令将部署产物 ../dist/connection.json 的 apiBase 改为 /。
+- Wrangler 保留 keep_vars=true，并声明 BROWSER、QNH_PHONE_SESSIONS、QNH_BROWSER_BUDGET。
+- 原运行时变量 GITHUB_APP_ID、GITHUB_APP_INSTALLATION_ID 和 Secret GITHUB_APP_PRIVATE_KEY 继续保留。无需重新创建凭据。
+- 每 UTC 日两次、合计八分钟的保守登录试用预算；未启用付费套餐，不承诺日常多人容量。
 
-App 模式不要求个人 GITHUB_TOKEN、员工 TEAM_PASSWORD 或旧团队会话密钥。旧 PAT/团队会话仅保留明确 legacy 模式兼容；生产 qnh 模式不接受旧团队 Cookie 或团队口令。
+## GitHub 授权边界
 
-## 授权边界
+RS256 JWT 和受限安装令牌只保留在服务端。每次刷新核对固定 bzq 安装、权限、账号及未暂停状态，令牌只请求 bzq Contents 写权限。部分 App 配置不会退回 PAT，错误不反射凭据、上游正文或请求头。
 
-JWT 使用 RS256，iat 回溯 60 秒，exp 为当前时间后 9 分钟。每次刷新先验证固定 bzq 的安装 ID、App ID、账号、Contents 写权限和未暂停状态，再请求 repositories:[bzq]、permissions:{contents:write}。响应必须只含 bzq，不能扩大权限。
+服务端 fetch 使用 Workers 支持的 redirect:manual，并拒绝 3xx、已跳转或异域响应；不会把调用者 Cookie 转发给 GitHub。共享浏览器 GitHubStore 保留原有浏览器策略。
 
-PEM 支持 GitHub 常见 PKCS#1 与 PKCS#8 RSA 格式，最少 2048 位。访问凭据仅保留在 Worker 内存，过期前 90 秒刷新；并发请求共享一次获取，配置或密钥变化隔离缓存。身份请求超时和响应大小有限制，不跟随重定向，错误不反射上游正文或凭据。业务返回 401 时清缓存，下次重新获取；不自动重试不确定的业务写入。
+## 历史兼容
 
-服务端使用 Workers 支持的 `redirect:manual`，并拒绝所有 3xx、已跳转或异域响应。服务器没有浏览器 Cookie 存储，不转发调用者 Cookie，也不传入浏览器专用的 credentials/referrerPolicy 选项；共享的浏览器 GitHubStore 仍保留原策略，由服务端适配层转换。
+明确 legacy 模式保留旧 PAT/团队会话，仅供历史部署兼容。生产 qnh 模式不接受旧团队 Cookie 或团队口令。电脑桥接模块保留独立验证用途，不能授权手机会话；新手机即时 SKU 查询不使用共享 GitHub 任务队列。
 
-## 员工手机登录尚未接通
-
-生产 qnh + App 模式的 /api/session 会验证固定 GitHub App 安装和受限令牌签发，成功返回 githubAuthorization:ready，失败返回 503 / githubAuthorization:unavailable；成功及失败检查缓存 30 秒，并隔离配置变更和并发请求。该检查不访问业务文件，不返回授权凭据，也不是批次保存验收。即使 GitHub 授权通过，仍返回 configured:true、authorized:false、loginMethod:qnh_pending。/api/login 不接受团队口令，批次读取、写入和手机 SKU 任务保持禁止。App 明确显示尚未接通，不会把打开牵牛花网页或电脑登录视为员工已登录。
-
-员工入口先显示牵牛花登录页，可点击“打开牵牛花登录”在新窗口访问固定官方地址 https://qnh.meituan.com/。这是官方页面入口，当前没有跨站登录回调；打开或返回 App 均不会授予保质期数据访问权限。仅在服务端确认 authorized:true 且批次数据读取成功后展示业务界面。未接通时明确提示，不显示 GitHub 配置，也不会把“我已登录”按钮当作登录成功。兼容团队口令仅在后台明确返回 loginMethod:legacy 时出现。
-
-最小授权条件是：服务端可信地确认本手机独立的牵牛花会话当前能访问指定租户的商品页面；不强制取得完整员工身份接口。当前网页无法读取其他域的登录状态，独立登录验证尚未接通。已观察的商品页顶栏租户为 1012619，但读取顶栏旧 DOM 本身不能替代实时商品访问验证。未来托管浏览器方案还需隔离每台手机、限制输入能力、验证租户与新鲜商品读取、管理全局额度并完成真实登录验收，才可启用。Cloudflare Browser Run 免费版每天合计 10 分钟，仅适合验证；本次未启用托管会话或升级套餐。
-
-## 数据与兼容接口
-
-业务数据固定 main:data/shelf-life.json；按需商品任务固定 data/qnh-queries.json，使用预期 SHA 进行版本冲突保护。旧商品快照及照片接口保留历史兼容；新批次照片只用于手机本地 OCR，不上传。
-
-本机桥接 POST /api/qnh/bridge/claim、/result 仍要求独立 Bearer key，拒绝浏览器 Origin；不能用它充当员工登录。查询最多 20 个任务、5 分钟有效、60 秒领取租约。GitHub 文件不存在时按需创建，不预建空文件。
-
-## 验收
-
-测试使用临时 RSA 密钥与 mock GitHub，验证签名、PKCS#1/8、续期、并发、配置旋转、固定仓库、权限收窄、错误脱敏及身份未接入时禁止数据访问。测试不会使用真实凭据或写业务仓库。
-
-只有管理员实际安装与配置成功、接入员工身份、再通过手机扫码查询和无照片批次保存测试，才算整体上线完成。源码部署成功或 /api/session 的 configured:true 不证明 GitHub 写权限已实测。
+本地 mock 测试不能替代真实登录、SKU 查询、保存和第二租户隔离验收。未通过实际验证不得宣称完整流程已经可用。

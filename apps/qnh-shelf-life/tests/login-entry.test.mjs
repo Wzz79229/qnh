@@ -21,9 +21,10 @@ function element() {
     contains: name => classes.has(name), remove: name => classes.delete(name),
   } };
 }
-function harness({ session = { configured: true, authorized: false, loginMethod: 'qnh_pending' }, stateResponse, logoutResponse, search = '' } = {}) {
+function harness({ session = { configured: true, authorized: false, loginMethod: 'qnh_pending' }, stateResponse, logoutResponse, search = '', url = 'https://app.example/' } = {}) {
   const selectors = new Map(['#main', '.desktop-nav', '.bottom-nav', '#page-label', '#sync-pill', '#user-avatar', '#toast'].map(key => [key, element()]));
-  const body = element(), listeners = new Map(), windowListeners = new Map(), calls = [];
+  const body = element(), listeners = new Map(), windowListeners = new Map(), calls = [], redirects=[];
+  const pageUrl=new URL(url);if(search)pageUrl.search=search;
   const dialogs = new Map();
   const makeDialog = (id, html='', open=false) => {
     const handlers = new Map();
@@ -37,7 +38,7 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
     return dialog;
   };
   for(const id of ['record-dialog','confirm-dialog','import-dialog','conflict-dialog'])dialogs.set(id,makeDialog(id));
-  let activeSession = session, skuFlows = 0;
+  let activeSession = session, skuFlows = 0, viewerOpens = 0, viewerCloses = 0, viewerCallbacks;
   const fetchImpl = async (url, init = {}) => {
     const path = new URL(url, 'https://app.example/').pathname;
     calls.push({ path, method: init.method || 'GET', body: init.body });
@@ -60,15 +61,20 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
   };
   const context = vm.createContext({ ...core, ConflictError,
     CloudStore: class extends CloudStore { constructor(base) { super(base, fetchImpl); } },
-    document, navigator: {}, location: { search, href: `https://app.example/${search}`, hostname: 'app.example' },
+    document, navigator: {}, location: { search:pageUrl.search, href:pageUrl.href, hostname:pageUrl.hostname, origin:pageUrl.origin, pathname:pageUrl.pathname, replace:target=>redirects.push(target) },
     window: { addEventListener: (name, listener) => windowListeners.set(name, listener), scrollTo() {} }, fetch: fetchImpl,
     URL, URLSearchParams, Intl, FormData, Event, console,
     setInterval: () => 0, setTimeout: () => 0, clearTimeout() {},
     openSkuFlow() { skuFlows++; },
+    openQnhLoginViewer(callbacks) {
+      viewerOpens++;viewerCallbacks=callbacks;
+      let closed=false;
+      return { close() { if(!closed){closed=true;viewerCloses++;} } };
+    },
   });
   entry.runInContext(context);
   return {
-    body, calls, selectors, dialogs, main: () => selectors.get('#main').innerHTML,
+    body, calls, selectors, dialogs, redirects, main: () => selectors.get('#main').innerHTML,
     recordCount: () => context.testApp.recordCount(),
     async settle() {
       for(let turn = 0; turn < 20 && context.testApp.isBusy(); turn++)await new Promise(resolve => setImmediate(resolve));
@@ -76,40 +82,52 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
     },
     login: password => context.testApp.autoConnect(password),
     click: action => listeners.get('click')({ target: { closest: () => ({ dataset: { action } }) } }),
-    clickOfficialLink: () => listeners.get('click')({ target: { closest: () => null } }),
+    setSession(value) { activeSession=value; },
+    viewerOpens: () => viewerOpens,
+    viewerCloses: () => viewerCloses,
+    authorizeViewer: () => viewerCallbacks?.onAuthorized(),
+    closeViewer: () => viewerCallbacks?.onClose(),
     emitWindow: name => windowListeners.get(name)?.({ type: name }),
     emitDocument: name => listeners.get(name)?.({ type: name }),
     skuFlows: () => skuFlows,
   };
 }
 
-test('QNH pending opens only the fixed official login page and keeps business UI locked', async () => {
+test('QNH pending keeps entry locked without opening an external login page', async () => {
   const app = harness();await app.settle();
   assert.equal(app.body.classList.contains('login-required'), true);
   assert.match(app.main(), /牵牛花登录连接尚未接通/);
-  assert.match(app.main(), /<a class="button primary login-button" href="https:\/\/qnh\.meituan\.com\/" target="_blank" rel="noopener noreferrer">打开牵牛花登录<\/a>/);
-  assert.match(app.main(), /登录后自动进入保质期管理尚未接通/);
-  assert.doesNotMatch(app.main(), /GitHub|GITHUB_|bzq|data-page|team-login-form|disabled>登录牵牛花/);
-  const hrefs = [...app.main().matchAll(/href="([^"]+)"/g)].map(match => match[1]);
-  assert.deepEqual(hrefs.filter(href => !href.startsWith('#')), ['https://qnh.meituan.com/']);
+  assert.match(app.main(), /disabled>登录牵牛花/);
+  assert.doesNotMatch(app.main(), /GitHub|GITHUB_|bzq|data-page|team-login-form|<a\b|target="_blank"|data-action="qnh-login"/);
   assert.equal(app.selectors.get('.bottom-nav').innerHTML, '');
   assert.equal(app.calls.some(call => call.path === '/api/state'), false);
   await app.click('add');
+  await app.click('qnh-login');
   assert.equal(app.skuFlows(), 0);
+  assert.equal(app.viewerOpens(), 0);
   assert.equal(app.calls.length, 2);
 });
 
-test('the official login link waits for the initial server check', async () => {
-  const app = harness();
+test('the inline login button waits for an explicit available server integration', async () => {
+  const app = harness({session:{configured:true,authorized:false,loginMethod:'qnh_browser',loginAvailable:true}});
   assert.match(app.main(), /disabled>正在检查登录/);
-  assert.doesNotMatch(app.main(), /<a\b|打开牵牛花登录/);
+  assert.doesNotMatch(app.main(), /<a\b|data-action="qnh-login"/);
   await app.settle();
-  assert.match(app.main(), /打开牵牛花登录/);
+  assert.match(app.main(), /data-action="qnh-login">登录牵牛花/);
+  assert.match(app.main(), /在鲜期中完成登录/);
+  assert.doesNotMatch(app.main(), /<a\b|target="_blank"|新窗口/);
+  await app.click('qnh-login');
+  assert.equal(app.viewerOpens(),1);
+  assert.equal(app.viewerCloses(),0,'opening must not immediately destroy the modal');
+  assert.equal(app.calls.some(call=>call.path==='/api/state'),false);
 });
 
-test('opening the official page and returning never grants app access or reads business data', async () => {
-  const app = harness();await app.settle();
-  await app.clickOfficialLink();
+test('opening or closing the inline login and returning to the app cannot grant access', async () => {
+  const app = harness({session:{configured:true,authorized:false,loginMethod:'qnh_browser',loginAvailable:true}});await app.settle();
+  await app.click('qnh-login');
+  await app.click('qnh-login');
+  assert.equal(app.viewerOpens(),1,'duplicate taps share one viewer');
+  app.closeViewer();
   app.emitWindow('focus');app.emitDocument('visibilitychange');
   await app.settle();
   assert.equal(app.calls.length, 2);
@@ -119,16 +137,92 @@ test('opening the official page and returning never grants app access or reads b
   assert.equal(app.calls.filter(call => call.path === '/api/session').length, 2);
   assert.equal(app.calls.some(call => call.path === '/api/login' || call.path === '/api/state'), false);
   assert.equal(app.body.classList.contains('login-required'), true);
-  assert.match(app.main(), /打开牵牛花登录/);
+  assert.match(app.main(), /data-action="qnh-login"/);
 });
 
-test('a pending integration cannot authorize access or override the official login destination', async () => {
+test('a pending integration cannot authorize access or replace login with an external destination', async () => {
   const app = harness({ session: { configured: true, authorized: true, loginMethod: 'qnh_pending', loginUrl: 'https://untrusted.example/?token=synthetic-secret', message: 'fake login complete' } });
   await app.settle();
-  assert.match(app.main(), /href="https:\/\/qnh\.meituan\.com\/"/);
-  assert.doesNotMatch(app.main(), /untrusted|token=|synthetic-secret|fake login complete/);
+  assert.match(app.main(), /disabled>登录牵牛花/);
+  assert.doesNotMatch(app.main(), /<a\b|untrusted|token=|synthetic-secret|fake login complete|data-action="qnh-login"/);
   assert.equal(app.calls.some(call => call.path === '/api/state'), false);
   assert.equal(app.body.classList.contains('login-required'), true);
+});
+
+test('inline login requires literal boolean availability and a supported method', async () => {
+  for(const session of [
+    {loginMethod:'qnh_browser',loginAvailable:'true'},
+    {loginMethod:'qnh_browser',loginAvailable:1},
+    {loginMethod:'qnh_browser',loginAvailable:false},
+    {loginMethod:'qnh_pending',loginAvailable:true},
+    {loginMethod:'unexpected',loginAvailable:true},
+  ]){
+    const app=harness({session:{configured:true,authorized:false,...session}});await app.settle();
+    await app.click('qnh-login');
+    assert.equal(app.viewerOpens(),0);
+    assert.doesNotMatch(app.main(),/data-action="qnh-login"/);
+  }
+});
+
+test('a viewer success callback still requires server authorization before reading state', async () => {
+  const app=harness({session:{configured:true,authorized:false,loginMethod:'qnh_browser',loginAvailable:true}});await app.settle();
+  await app.click('qnh-login');
+  await app.authorizeViewer();await app.settle();
+  assert.equal(app.calls.filter(call=>call.path==='/api/session').length,2);
+  assert.equal(app.calls.some(call=>call.path==='/api/state'),false);
+  assert.equal(app.body.classList.contains('login-required'),true);
+  assert.doesNotMatch(app.main(),/保质期总览/);
+});
+
+test('verified inline login automatically enters only after successful server data read', async () => {
+  let finishRead;
+  const read=new Promise(resolve=>{finishRead=resolve;});
+  const app=harness({session:{configured:true,authorized:false,loginMethod:'qnh_browser',loginAvailable:true},stateResponse:()=>read});await app.settle();
+  await app.click('qnh-login');
+  app.setSession({configured:true,authorized:true,loginMethod:'qnh_browser',loginAvailable:true});
+  const completing=app.authorizeViewer();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.body.classList.contains('login-required'),true);
+  assert.doesNotMatch(app.main(),/保质期总览/);
+  finishRead(json({data,sha:'authorized-sha'}));await completing;await app.settle();
+  assert.equal(app.body.classList.contains('login-required'),false);
+  assert.match(app.main(),/保质期总览/);
+});
+
+test('rechecking closes the old viewer and ignores its delayed success callback', async () => {
+  const app=harness({session:{configured:true,authorized:false,loginMethod:'qnh_browser',loginAvailable:true}});await app.settle();
+  await app.click('qnh-login');
+  await app.click('auto-connect');await app.settle();
+  assert.equal(app.viewerCloses(),1);
+  await app.authorizeViewer();await app.settle();
+  assert.equal(app.calls.filter(call=>call.path==='/api/session').length,2);
+  assert.equal(app.calls.some(call=>call.path==='/api/state'),false);
+  assert.equal(app.body.classList.contains('login-required'),true);
+});
+
+test('the old Pages entry changes to the fixed same-app origin before starting phone login', async () => {
+  const app=harness({url:'https://wzz79229.github.io/qnh/shelf-life/',session:{configured:true,authorized:true,loginMethod:'qnh_browser',loginAvailable:true,loginUrl:'https://untrusted.example/'}});await app.settle();
+  assert.deepEqual(app.redirects,['https://qnh-shelf-life-api.w792294944.workers.dev/']);
+  assert.equal(app.calls.some(call=>call.path==='/api/state'),false);
+  assert.equal(app.body.classList.contains('login-required'),true);
+  assert.doesNotMatch(app.main(),/data-action="qnh-login"|untrusted|<a\b/);
+  await app.click('qnh-login');
+  assert.equal(app.viewerOpens(),0);
+});
+
+test('the primary app, local preview, unrelated paths and explicit demo do not redirect', async () => {
+  for(const url of [
+    'https://qnh-shelf-life-api.w792294944.workers.dev/',
+    'http://127.0.0.1:4176/',
+    'https://wzz79229.github.io/another-app/',
+    'https://untrusted.example/qnh/shelf-life/',
+  ]){
+    const app=harness({url,session:{configured:true,authorized:false,loginMethod:'qnh_browser',loginAvailable:true}});await app.settle();
+    assert.deepEqual(app.redirects,[]);
+  }
+  const demo=harness({url:'https://wzz79229.github.io/qnh/shelf-life/?demo=1',session:{configured:true,authorized:false,loginMethod:'qnh_browser',loginAvailable:true}});await demo.settle();
+  assert.deepEqual(demo.redirects,[]);
+  assert.equal(demo.calls.length,0);
 });
 
 test('only boolean authorized true can begin reading business data', async () => {
@@ -256,4 +350,14 @@ test('the login gate clears open and already closed business dialogs and runs th
     assert.equal(dialog.innerHTML,'');assert.equal(dialog.open,false);
   }
   assert.equal(app.body.classList.contains('login-required'),true);
+});
+
+test('an authorized first tenant read opens an empty workspace without creating a file', async () => {
+  const app=harness({session:{configured:true,authorized:true,loginMethod:'qnh_browser',loginAvailable:true,tenantId:'7654321'},
+    stateResponse:()=>json({data:null,sha:null})});
+  await app.settle();
+  assert.equal(app.body.classList.contains('login-required'),false);
+  assert.equal(app.recordCount(),0);
+  assert.match(app.main(),/保质期总览/);
+  assert.equal(app.calls.some(call=>call.method==='PUT'),false);
 });

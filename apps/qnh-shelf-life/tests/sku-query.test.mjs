@@ -40,6 +40,100 @@ test('lookup submits a 19-digit exact SKU string, follows pending/working/found 
   assert.equal(h.oldCatalogCalls, 0);
 });
 
+test('phone direct results preserve exact 19-digit and leading-zero SKUs without polling or catalog reads', async () => {
+  for(const sku of [SKU,'0000123456789012345']){
+    const requested=[];
+    const h=fixture([],{async createSkuQuery(value){requested.push(value);return {mode:'direct',sku:value,status:'found',product:{...PRODUCT,sku:value,privateMetadata:'not displayed'}};}});
+    const product=await lookupSku(h.store,` ${sku} `,{now:h.now,wait:h.wait});
+    assert.deepEqual(requested,[sku]);
+    assert.equal(typeof requested[0],'string');
+    assert.deepEqual(product,{...PRODUCT,sku});
+    assert.equal(h.calls.length,0,'direct responses must not call the polling API');
+    assert.equal(h.now(),0);
+    assert.equal(h.oldCatalogCalls,0);
+  }
+});
+
+test('every phone lookup submits afresh even for the same SKU', async () => {
+  let submissions=0;
+  const h=fixture([],{async createSkuQuery(sku){submissions++;return {mode:'direct',sku,status:'found',product:PRODUCT};}});
+  await lookupSku(h.store,SKU,{now:h.now,wait:h.wait});
+  await lookupSku(h.store,SKU,{now:h.now,wait:h.wait});
+  assert.equal(submissions,2);
+  assert.equal(h.calls.length,0);
+  assert.equal(h.oldCatalogCalls,0);
+});
+
+test('phone direct responses reject another exact SKU, numeric SKU or mismatched normalized product', async () => {
+  for(const response of [
+    {sku:'2110000000000000002',product:PRODUCT},
+    {sku:2110000000000000001,product:PRODUCT},
+    {sku:` ${SKU} `,product:PRODUCT},
+    {sku:SKU,product:{...PRODUCT,sku:'2110000000000000002'}},
+    {sku:SKU,product:{...PRODUCT,sku:2110000000000000001}},
+  ]){
+    const h=fixture([],{async createSkuQuery(){return {mode:'direct',status:'found',...response};}});
+    await assert.rejects(lookupSku(h.store,SKU,{now:h.now,wait:h.wait}),/SKU/);
+    assert.equal(h.calls.length,0);
+    assert.equal(h.oldCatalogCalls,0);
+  }
+});
+
+test('phone direct products use the existing safe image URL validation', async () => {
+  for(const imageUrl of [
+    'https://untrusted.example/product.jpg',
+    'https://img.meituan.net/product.jpg?token=synthetic',
+    'https://user:password@img.meituan.net/product.jpg',
+    'javascript:alert(1)',
+  ]){
+    const h=fixture([],{async createSkuQuery(sku){return {mode:'direct',sku,status:'found',product:{...PRODUCT,imageUrl}};}});
+    await assert.rejects(lookupSku(h.store,SKU,{now:h.now,wait:h.wait}),error=>error.code==='UNSAFE_IMAGE_URL');
+    assert.equal(h.calls.length,0);
+    assert.equal(h.oldCatalogCalls,0);
+  }
+});
+
+test('phone direct terminal failures hide arbitrary provider messages and never poll', async () => {
+  for(const status of ['not_found','ambiguous','error']){
+    const h=fixture([],{async createSkuQuery(sku){return {mode:'direct',sku,status,product:PRODUCT,message:'unsafe provider detail'};}});
+    await assert.rejects(lookupSku(h.store,SKU,{now:h.now,wait:h.wait}),error=>error.code===status&&!error.message.includes('unsafe')&&!/电脑|查询程序/.test(error.message));
+    assert.equal(h.calls.length,0);
+    assert.equal(h.oldCatalogCalls,0);
+  }
+  const missingImage='此 SKU 的商品主图缺失，请在牵牛花核对后重试。';
+  const h=fixture([],{async createSkuQuery(sku){return {mode:'direct',sku,status:'error',message:missingImage};}});
+  await assert.rejects(lookupSku(h.store,SKU,{now:h.now,wait:h.wait}),error=>error.code==='error'&&error.message===missingImage);
+});
+
+test('only an explicit direct mode and supported terminal status bypass legacy job validation', async () => {
+  for(const mode of [undefined,'DIRECT','other']){
+    const h=fixture([],{async createSkuQuery(sku){return {mode,sku,status:'found',product:PRODUCT};}});
+    await assert.rejects(lookupSku(h.store,SKU,{now:h.now,wait:h.wait}),/无效任务/);
+    assert.equal(h.calls.length,0);
+  }
+  for(const status of ['pending','working','login_required','unknown',undefined]){
+    const h=fixture([],{async createSkuQuery(sku){return {mode:'direct',sku,status,product:PRODUCT};}});
+    await assert.rejects(lookupSku(h.store,SKU,{now:h.now,wait:h.wait}),error=>error.code==='INVALID_QUERY_STATUS');
+    assert.equal(h.calls.length,0);
+  }
+});
+
+test('cancelled or overdue phone submission cannot return a late product or poll', async () => {
+  for(const reason of ['abort','timeout']){
+    const submitted=deferred();
+    const controller=new AbortController();
+    let submittedSku;
+    const h=fixture([],{createSkuQuery(sku){submittedSku=sku;return submitted.promise;}});
+    const running=lookupSku(h.store,SKU,{signal:controller.signal,now:h.now,wait:h.wait,timeoutMs:5000});
+    assert.equal(submittedSku,SKU);
+    if(reason==='abort')controller.abort();else h.advance(5001);
+    submitted.resolve({mode:'direct',sku:SKU,status:'found',product:PRODUCT});
+    await assert.rejects(running,error=>reason==='abort'?error.name==='AbortError':error.code==='QNH_QUERY_TIMEOUT'&&!/电脑|查询程序/.test(error.message));
+    assert.equal(h.calls.length,0);
+    assert.equal(h.oldCatalogCalls,0);
+  }
+});
+
 test('SKU normalization preserves leading zeroes and rejects non-SKU inputs before any network access', async () => {
   assert.equal(normalizeSku(' 0000123 '), '0000123');
   assert.equal(normalizeSku('AbC-01._'), 'AbC-01._');
