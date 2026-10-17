@@ -172,27 +172,208 @@ test('Worker authenticates members before minting, then uses App token for fixed
   assert.equal(repositoryCalls, 1);
 });
 
-test('App defaults to QNH identity mode, does not require a team password and cannot grant data access', async () => {
-  let requests = 0;
-  const worker = createWorker({ now: () => START, cryptoImpl: webcrypto, fetchImpl: async () => { requests++; throw new Error('unexpected'); } });
-  const environment = { ...APP, ALLOWED_ORIGIN: 'https://wzz79229.github.io' };
-  const request = (path, options = {}) => worker.fetch(new Request('https://example.workers.dev/api/' + path, {
-    ...options, headers: { Origin: environment.ALLOWED_ORIGIN, 'Content-Type': 'application/json', ...options.headers },
-  }), environment);
-  const session = await (await request('session')).json();
-  assert.equal(session.authorized, false);
-  assert.equal(session.loginMethod, 'qnh_pending');
-  assert.equal((await request('state')).status, 503);
-  assert.equal((await request('qnh/queries', { method: 'POST', body: JSON.stringify({ sku: 'synthetic' }) })).status, 503);
-  const login = await request('login', { method: 'POST', body: JSON.stringify({ password: 'must-not-grant-access' }) });
+const ORIGIN = 'https://wzz79229.github.io';
+
+function readinessFixture({ fail = () => false, changeInstallation = value => value, changeToken = value => value, beforeFetch = async () => {} } = {}) {
+  let time = START;
+  const calls = [];
+  const installations = new Map([['123', '456'], ['124', '456']]);
+  const environment = { ...APP, ALLOWED_ORIGIN: ORIGIN };
+  const worker = createWorker({ now: () => time, cryptoImpl: webcrypto, fetchImpl: async (url, options) => {
+    const call = { url, options };
+    calls.push(call);
+    const jwt = options.headers.Authorization.slice(7);
+    const [header, payload, signature] = jwt.split('.');
+    const claims = JSON.parse(Buffer.from(payload, 'base64url'));
+    assert.equal(verify('RSA-SHA256', Buffer.from(header + '.' + payload), keys.publicKey, Buffer.from(signature, 'base64url')), true);
+    assert.equal(options.redirect, 'error');
+    assert.equal(options.credentials, 'omit');
+    await beforeFetch(call, calls.length);
+    if (fail(call, calls.length)) throw new Error('PRIVATE_UPSTREAM_EXCEPTION_DO_NOT_REFLECT');
+    const installationId = installations.get(claims.iss);
+    assert.ok(installationId, 'The test only permits synthetic known app IDs');
+    if (options.method === 'GET') {
+      assert.equal(url, 'https://api.github.com/repos/Wzz79229/bzq/installation');
+      return Response.json(changeInstallation({ ...installation(), app_id: Number(claims.iss), id: Number(installationId) }));
+    }
+    assert.equal(options.method, 'POST');
+    assert.equal(url, `https://api.github.com/app/installations/${installationId}/access_tokens`);
+    assert.deepEqual(JSON.parse(options.body), { repositories: ['bzq'], permissions: { contents: 'write' } });
+    return Response.json(changeToken(issued(time)));
+  } });
+  const request = (path = 'session', options = {}, env = environment) => {
+    const { origin = ORIGIN, headers = {}, ...init } = options;
+    return worker.fetch(new Request('https://example.workers.dev/api/' + path, {
+      ...init, headers: { ...(origin === null ? {} : { Origin: origin }), 'Content-Type': 'application/json', ...headers },
+    }), env);
+  };
+  return { calls, environment, request, advance: value => { time += value; }, setInstallation: (app, id) => installations.set(app, id) };
+}
+
+function assertPendingIdentity(body, githubAuthorization) {
+  assert.equal(body.configured, true);
+  assert.equal(body.authorized, false);
+  assert.equal(body.loginMethod, 'qnh_pending');
+  assert.equal(body.githubAuthorization, githubAuthorization);
+}
+
+function assertNoAuthorizationDisclosure(body, calls) {
+  const serialized = JSON.stringify(body);
+  for (const secret of [PEM, PKCS1, issued(START).token, 'PRIVATE_UPSTREAM_EXCEPTION_DO_NOT_REFLECT',
+    ...calls.map(call => call.options.headers.Authorization.slice(7))]) {
+    assert.equal(serialized.includes(secret), false);
+  }
+  assert.doesNotMatch(serialized, /BEGIN (?:RSA )?PRIVATE KEY|ghs_synthetic_|"(?:token|jwt|pem|privateKey|installation)"/u);
+}
+
+test('QNH session verifies only fixed App installation and scoped minting without granting identity or disclosing credentials', async () => {
+  const f = readinessFixture();
+  const response = await f.request();
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Set-Cookie'), null);
+  assert.match(response.headers.get('Cache-Control'), /no-store/);
+  const body = await response.json();
+  assertPendingIdentity(body, 'ready');
+  assertNoAuthorizationDisclosure(body, f.calls);
+  assert.deepEqual(f.calls.map(call => [call.options.method, call.url]), [
+    ['GET', 'https://api.github.com/repos/Wzz79229/bzq/installation'],
+    ['POST', 'https://api.github.com/app/installations/456/access_tokens'],
+  ]);
+  await f.request();
+  f.advance(29999);
+  await f.request();
+  assert.equal(f.calls.length, 2);
+  f.advance(1);
+  assertPendingIdentity(await (await f.request()).json(), 'ready');
+  assert.equal(f.calls.length, 2, 'Health cache expiry must preserve the provider installation-token cache');
+});
+
+test('QNH session failure is generic, backs off for 30 seconds and recovers without exposing upstream details', async () => {
+  let unavailable = true;
+  const f = readinessFixture({ fail: () => unavailable });
+  const first = await f.request();
+  assert.equal(first.status, 503);
+  assert.equal(first.headers.get('Retry-After'), '30');
+  assert.equal(first.headers.get('Set-Cookie'), null);
+  const failure = await first.json();
+  assertPendingIdentity(failure, 'unavailable');
+  assert.equal(failure.code, 'GITHUB_APP_AUTH_FAILED');
+  assertNoAuthorizationDisclosure(failure, f.calls);
+  assert.equal(f.calls.length, 1);
+  unavailable = false;
+  f.advance(29999);
+  const cached = await f.request();
+  assert.equal(cached.status, 503);
+  assert.deepEqual(await cached.json(), failure);
+  assert.equal(f.calls.length, 1);
+  f.advance(1);
+  const recovered = await f.request();
+  assert.equal(recovered.status, 200);
+  assertPendingIdentity(await recovered.json(), 'ready');
+  assert.equal(f.calls.length, 3);
+});
+
+test('concurrent QNH readiness checks share one pending installation and token request', async () => {
+  let release;
+  let started;
+  const gate = new Promise(resolve => { release = resolve; });
+  const waiting = new Promise(resolve => { started = resolve; });
+  const f = readinessFixture({ beforeFetch: async (_call, count) => { if (count === 1) { started(); await gate; } } });
+  const pending = Array.from({ length: 8 }, () => f.request());
+  await waiting;
+  assert.equal(f.calls.length, 1);
+  release();
+  const responses = await Promise.all(pending);
+  for (const response of responses) {
+    assert.equal(response.status, 200);
+    assertPendingIdentity(await response.json(), 'ready');
+  }
+  assert.equal(f.calls.length, 2);
+});
+
+test('each App configuration field invalidates readiness immediately instead of reusing a prior success', async () => {
+  for (const patch of [{ GITHUB_APP_ID: '124' }, { GITHUB_APP_INSTALLATION_ID: '789' }, { GITHUB_APP_PRIVATE_KEY: PKCS1 }]) {
+    const f = readinessFixture();
+    assert.equal((await f.request()).status, 200);
+    if (patch.GITHUB_APP_INSTALLATION_ID) f.setInstallation('123', patch.GITHUB_APP_INSTALLATION_ID);
+    assert.equal((await f.request('session', {}, { ...f.environment, ...patch })).status, 200);
+    assert.equal(f.calls.length, 4);
+  }
+});
+
+test('configuration rotation also bypasses a cached failure and incomplete configuration never reuses ready', async () => {
+  let unavailable = true;
+  const f = readinessFixture({ fail: () => unavailable });
+  assert.equal((await f.request()).status, 503);
+  unavailable = false;
+  assert.equal((await f.request('session', {}, { ...f.environment, GITHUB_APP_ID: '124' })).status, 200);
+  assert.equal(f.calls.length, 3);
+  const incomplete = await f.request('session', {}, { ...f.environment, GITHUB_APP_PRIVATE_KEY: '' });
+  assert.equal(incomplete.status, 503);
+  assert.equal((await incomplete.json()).code, 'SETUP_REQUIRED');
+  assert.equal(f.calls.length, 3);
+});
+
+test('bad DER, denied installation and widened minted token never appear ready', async () => {
+  const malformed = readinessFixture();
+  const response = await malformed.request('session', {}, { ...malformed.environment,
+    GITHUB_APP_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----YQ==-----END PRIVATE KEY-----' });
+  assert.equal(response.status, 503);
+  assertPendingIdentity(await response.json(), 'unavailable');
+  assert.equal(malformed.calls.length, 0);
+  for (const options of [{ changeInstallation: value => ({ ...value, account: { login: 'other' } }) },
+    { changeToken: value => ({ ...value, repositories: [{ full_name: 'Wzz79229/qnh' }] }) }]) {
+    const f = readinessFixture(options);
+    const denied = await f.request();
+    assert.equal(denied.status, 503);
+    const body = await denied.json();
+    assertPendingIdentity(body, 'unavailable');
+    assertNoAuthorizationDisclosure(body, f.calls);
+  }
+});
+
+test('invalid origins, preflight and unauthenticated member routes do not trigger any App probe', async () => {
+  const f = readinessFixture();
+  assert.equal((await f.request('session', { origin: 'https://untrusted.example' })).status, 403);
+  assert.equal((await f.request('session', { origin: null, headers: { 'Sec-Fetch-Site': 'cross-site' } })).status, 403);
+  const preflight = await f.request('session', { method: 'OPTIONS', headers: { 'Access-Control-Request-Method': 'GET' } });
+  assert.equal(preflight.status, 204);
+  assert.equal((await f.request('session', { method: 'POST' })).status, 405);
+  for (const [path, options = {}] of [['state'], ['catalog'], ['catalog/pages/0'],
+    ['photos/12345678-1234-4234-8234-123456789abc'], ['photos', { method: 'POST', body: '{}' }],
+    ['qnh/queries', { method: 'POST', body: JSON.stringify({ sku: 'synthetic' }) }]]) {
+    const response = await f.request(path, options);
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).code, 'QNH_LOGIN_NOT_CONNECTED');
+  }
+  const login = await f.request('login', { method: 'POST', body: JSON.stringify({ password: 'must-not-grant-access' }) });
   assert.equal((await login.json()).code, 'QNH_LOGIN_NOT_CONNECTED');
-  const legacyEnv = { ...environment, MEMBER_AUTH_MODE: 'legacy', TEAM_PASSWORD: 'synthetic-legacy-password', SESSION_SECRET: 'synthetic-legacy-session-secret-0123456789' };
-  const legacyLogin = await worker.fetch(new Request('https://example.workers.dev/api/login', {
-    method: 'POST', headers: { Origin: environment.ALLOWED_ORIGIN, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: legacyEnv.TEAM_PASSWORD }),
-  }), legacyEnv);
-  const oldCookie = legacyLogin.headers.get('Set-Cookie').split(';')[0];
-  assert.equal((await request('session', { headers: { Cookie: oldCookie } }).then(value => value.json())).authorized, false);
-  assert.equal((await request('state', { headers: { Cookie: oldCookie } })).status, 503);
-  assert.equal(requests, 0);
+  assert.equal(f.calls.length, 0);
+});
+
+test('App readiness does not let a legacy cookie or password stand in for QNH employee identity', async () => {
+  const f = readinessFixture();
+  const legacyEnv = { ...f.environment, MEMBER_AUTH_MODE: 'legacy', TEAM_PASSWORD: 'synthetic-legacy-password', SESSION_SECRET: 'synthetic-legacy-session-secret-0123456789' };
+  const login = await f.request('login', { method: 'POST', body: JSON.stringify({ password: legacyEnv.TEAM_PASSWORD }) }, legacyEnv);
+  assert.equal(login.status, 200);
+  const oldCookie = login.headers.get('Set-Cookie').split(';')[0];
+  assert.equal(f.calls.length, 0);
+  assertPendingIdentity(await (await f.request('session', { headers: { Cookie: oldCookie } })).json(), 'ready');
+  for (const path of ['state', 'catalog', 'qnh/queries/12345678-1234-4234-8234-123456789abc']) {
+    assert.equal((await f.request(path, { headers: { Cookie: oldCookie } })).status, 503);
+  }
+  assert.equal(f.calls.length, 2);
+});
+
+test('legacy App sessions and QNH PAT sessions keep their previous behavior without readiness probes', async () => {
+  const f = readinessFixture();
+  const legacyEnv = { ...f.environment, MEMBER_AUTH_MODE: 'legacy', TEAM_PASSWORD: 'synthetic-legacy-password', SESSION_SECRET: 'synthetic-legacy-session-secret-0123456789' };
+  assert.deepEqual(await (await f.request('session', {}, legacyEnv)).json(), { configured: true, authorized: false });
+  const login = await f.request('login', { method: 'POST', body: JSON.stringify({ password: legacyEnv.TEAM_PASSWORD }) }, legacyEnv);
+  const oldCookie = login.headers.get('Set-Cookie').split(';')[0];
+  assert.deepEqual(await (await f.request('session', { headers: { Cookie: oldCookie } }, legacyEnv)).json(), { configured: true, authorized: true });
+  const patEnv = { GITHUB_TOKEN: 'synthetic_pat', MEMBER_AUTH_MODE: 'qnh', ALLOWED_ORIGIN: ORIGIN };
+  const body = await (await f.request('session', {}, patEnv)).json();
+  assertPendingIdentity(body, undefined);
+  assert.equal(f.calls.length, 0);
 });

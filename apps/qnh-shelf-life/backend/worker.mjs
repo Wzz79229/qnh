@@ -182,6 +182,28 @@ function gitHubStatus(response, payload, writing) {
 export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.now(), cryptoImpl = globalThis.crypto } = {}) {
   const failures = new Map(); // Best-effort per-isolate throttling; not a global security boundary.
   const githubToken = createGitHubAuthorization({ fetchImpl, now, cryptoImpl });
+  let authorizationProbe = null;
+
+  async function githubAppReady(env) {
+    const identity = [env.GITHUB_APP_ID, env.GITHUB_APP_INSTALLATION_ID, env.GITHUB_APP_PRIVATE_KEY];
+    if (!authorizationProbe || identity.some((value, index) => value !== authorizationProbe.identity[index])) {
+      authorizationProbe = { identity, ready: false, until: 0, pending: null };
+    }
+    const entry = authorizationProbe;
+    if (entry.until > now()) return entry.ready;
+    if (!entry.pending) {
+      // Public readiness checks only validate the fixed installation and scoped token.
+      // They never read repository files, grant member access, or expose credentials.
+      entry.pending = (async () => {
+        try { await githubToken(env); entry.ready = true; }
+        catch { entry.ready = false; }
+        entry.until = now() + 30_000;
+        return entry.ready;
+      })().finally(() => { entry.pending = null; });
+    }
+    return entry.pending;
+  }
+
   const repositoryFetch = async (url, options) => {
     const response = await fetchImpl(url, { ...options, headers: { ...options.headers, 'User-Agent': 'qnh-shelf-life-team-backend' } });
     if (response.status === 401) githubToken.invalidate();
@@ -351,9 +373,16 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
         }
         if (!supported.includes(request.method)) throw new ApiError(405, 'METHOD_NOT_ALLOWED', '不支持此请求方式。', { Allow: supported.join(', ') });
         const active = await authorized(request, env);
-        if (url.pathname === '/api/session') return json(request, qnhLoginRequired(env)
-          ? { configured: true, authorized: false, loginMethod: 'qnh_pending', message: '牵牛花员工手机登录尚未接通，请由管理员取得官方登录授权接口。' }
-          : { configured: true, authorized: active });
+        if (url.pathname === '/api/session') {
+          if (!qnhLoginRequired(env)) return json(request, { configured: true, authorized: active });
+          const appMode = validateGitHubAuthorization(env).mode === 'app';
+          if (appMode && !await githubAppReady(env)) {
+            return json(request, { configured: true, authorized: false, loginMethod: 'qnh_pending', githubAuthorization: 'unavailable',
+              code: 'GITHUB_APP_AUTH_FAILED', message: 'GitHub 仓库授权验证未通过，请管理员检查 App 安装范围、权限和私钥。' }, 503, { 'Retry-After': '30' });
+          }
+          return json(request, { configured: true, authorized: false, loginMethod: 'qnh_pending',
+            ...(appMode ? { githubAuthorization: 'ready' } : {}), message: '牵牛花员工手机登录尚未接通，请由管理员取得官方登录授权接口。' });
+        }
         if (url.pathname === '/api/login') {
           if (qnhLoginRequired(env)) throw new ApiError(503, 'QNH_LOGIN_NOT_CONNECTED', '牵牛花员工手机登录尚未接通，当前不能使用团队口令代替登录。');
           const input = await readJSON(request, 2_048);

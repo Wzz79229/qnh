@@ -42,7 +42,7 @@
 | `QNH_CONNECTOR_KEY` | 本机查询桥接所需的独立随机 Secret；员工不用填写 |
 | `MEMBER_AUTH_MODE` | `qnh`，已在 wrangler.toml 声明；官方手机身份接通前保持禁止业务访问 |
 
-员工不填写 GitHub 令牌、连接密钥或团队口令。安装访问凭据在后台内存中自动获取及刷新，不提供给前端。App 配置完整后 `/api/session` 仍会明确返回 `qnh_pending`，直到牵牛花员工身份接通；这表示仓库配置和手机登录是两个不同阶段，不能把部署或配置成功当成业务验收。旧 PAT 和团队会话仅保留明确的 legacy 模式兼容，生产部署使用 qnh 模式。
+员工不填写 GitHub 令牌、连接密钥或团队口令。安装访问凭据在后台内存中自动获取及刷新，不提供给前端。`/api/session` 实际验证安装和受限令牌签发，通过时返回 `githubAuthorization:ready`，但仍明确返回 `qnh_pending`、`authorized:false`，直到牵牛花员工身份接通；该检查不读取业务文件，不能把 GitHub 授权通过当成批次保存验收。旧 PAT 和团队会话仅保留明确的 legacy 模式兼容，生产部署使用 qnh 模式。
 
 Cloudflare Git Build 根目录 `apps/qnh-shelf-life/backend`，构建命令只将部署产物 `../dist/connection.json` 的 `apiBase` 改为 `/`，部署命令 `npx wrangler deploy`。API 和 PWA 同域，避免手机跨站 Cookie 限制。公开 Pages 的连接文件只含公开 Worker 地址，不含 Secret。
 

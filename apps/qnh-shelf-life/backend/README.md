@@ -21,7 +21,7 @@ PEM 支持 GitHub 常见 PKCS#1 与 PKCS#8 RSA 格式，最少 2048 位。访问
 
 ## 员工手机登录尚未接通
 
-生产 qnh 模式的 /api/session 在仓库配置完整时返回 configured:true、authorized:false、loginMethod:qnh_pending。/api/login 不接受团队口令，批次读取、写入和手机 SKU 任务保持禁止。App 明确显示尚未接通，不会把打开牵牛花网页或电脑登录视为员工已登录。
+生产 qnh + App 模式的 /api/session 会验证固定 GitHub App 安装和受限令牌签发，成功返回 githubAuthorization:ready，失败返回 503 / githubAuthorization:unavailable；成功及失败检查缓存 30 秒，并隔离配置变更和并发请求。该检查不访问业务文件，不返回授权凭据，也不是批次保存验收。即使 GitHub 授权通过，仍返回 configured:true、authorized:false、loginMethod:qnh_pending。/api/login 不接受团队口令，批次读取、写入和手机 SKU 任务保持禁止。App 明确显示尚未接通，不会把打开牵牛花网页或电脑登录视为员工已登录。
 
 当前没有取得牵牛花官方员工身份授权接口、应用凭据及回调说明。需要官方可验证的员工和商户身份结果，才能实现每位员工手机登录后保存。商品 API 或门店整体授权不能直接充当员工身份认证。未实现电脑绑定手机方案。
 
