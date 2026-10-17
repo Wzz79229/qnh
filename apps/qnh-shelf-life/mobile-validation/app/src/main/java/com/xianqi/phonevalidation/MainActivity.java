@@ -271,12 +271,13 @@ public final class MainActivity extends Activity {
         return output.toByteArray();
     }
     private void clearLogin() {
+        ready = false; probing = false; navigation++;
         failQuery(""); lock(); web.stopLoading(); web.clearHistory(); web.clearCache(true); WebStorage.getInstance().deleteAllData();
         CookieManager.getInstance().removeAllCookies(removed -> { CookieManager.getInstance().flush(); web.loadUrl(LOGIN_URL); });
         status.setText("本机登录已清除，请重新登录牵牛花。");
     }
     private void showFatal(String message) { TextView text = label(message, 18); text.setPadding(dp(20), dp(40), dp(20), dp(20)); setContentView(text); }
-    @Override public void onResume() { super.onResume(); active = true; if (web != null) { web.onResume(); handler.removeCallbacks(tick); handler.post(tick); } }
+    @Override public void onResume() { super.onResume(); active = true; probing = false; if (web != null) { web.onResume(); handler.removeCallbacks(tick); handler.post(tick); } }
     @Override public void onPause() { active = false; handler.removeCallbacks(tick); if (web != null) web.onPause(); super.onPause(); }
     @Override public void onBackPressed() {
         if (web != null && web.getVisibility() == View.VISIBLE && loggedIn) showWorkbench();
