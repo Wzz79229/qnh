@@ -34,7 +34,6 @@ import org.json.JSONObject;
 import org.json.JSONTokener;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -176,6 +175,7 @@ public final class MainActivity extends Activity {
     private void handleProbe(JSONObject value) throws Exception {
         String observed = value.optString("tenantId", "");
         if (!value.optBoolean("authorized") || !observed.matches("[1-9][0-9]{0,19}")) { lock(); return; }
+        if (loggedIn && !tenantId.equals(observed)) lock();
         if (!observed.equals(candidate)) { candidate = observed; confirmations = 1; }
         else confirmations++;
         if (confirmations < 2) return;
@@ -199,10 +199,12 @@ public final class MainActivity extends Activity {
         }
     }
     private void lock() {
+        boolean previouslyLoggedIn = loggedIn;
         loggedIn = false; tenantId = ""; candidate = ""; confirmations = 0;
         if (returnButton == null) return;
         returnButton.setEnabled(false); failQuery(""); result.setText(""); image.setImageDrawable(null); image.setVisibility(View.GONE); imageStatus.setText("");
         workbench.setVisibility(View.GONE); web.setVisibility(View.VISIBLE); address.setVisibility(View.VISIBLE);
+        if (previouslyLoggedIn) status.setText("牵牛花登录状态已变化，请在官方页面完成登录。");
     }
     private void showOfficial() { web.setVisibility(View.VISIBLE); address.setVisibility(View.VISIBLE); workbench.setVisibility(View.GONE); }
     private void showWorkbench() { web.setVisibility(View.GONE); address.setVisibility(View.GONE); workbench.setVisibility(View.VISIBLE); }

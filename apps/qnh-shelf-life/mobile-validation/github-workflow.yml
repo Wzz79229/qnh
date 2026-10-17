@@ -35,6 +35,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
@@ -53,6 +54,7 @@ jobs:
         run: |
           sdkmanager 'platforms;android-35' 'build-tools;34.0.0'
           gradle --no-daemon :app:assembleDebug :app:lintDebug
+          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
           mkdir -p output
           cp app/build/outputs/apk/debug/app-debug.apk output/xianqi-phone-validation-0.1.0.apk
           sha256sum output/*.apk > output/SHA256SUMS.txt
