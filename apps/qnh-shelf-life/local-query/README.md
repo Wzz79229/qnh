@@ -2,7 +2,7 @@
 
 手机扫描牵牛花 SKU 后，Cloudflare 创建短期查询。本程序只通过 HTTPS 出站领取查询，在本机独立 Chrome/Edge 的商品主档页面搜索精确 SKU，返回名称、规格及当前商品图片。员工在手机手填清点件数。没有公网隧道，不同步整个商品库，不设置本机入站监听。
 
-当前状态：已根据实际商品主档 DOM 实现 SKU 字段、查询按钮、嵌套规格、表格刷新和“暂无内容”空状态适配。源码和模拟测试已完成；本程序尚未连接实际手机任务进行端到端验收。不要仅凭模拟测试宣称线上已连接。
+当前状态（2026-10-17）：Windows 启动入口的编码与换行问题已修复，真实 CMD 启动测试 8 项通过。用户已在独立 Edge 登录牵牛花，并在 `连接牵牛花.cmd` 中以真实 SKU 查回名称、规格和图片链接。本机实际查询已验证；手机 → Cloudflare → 本机的查询任务及批次保存尚未验收，线上后台当次检查仍返回 `SETUP_REQUIRED`。
 
 ## 先连接牵牛花
 
@@ -30,7 +30,7 @@ $env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
 npm ci --ignore-scripts --no-audit --no-fund --registry=https://registry.npmjs.org
 ```
 
-依赖固定为官方 `playwright@1.64.1`，锁文件含官方 npm 地址和完整性校验（2026-10-16 核对）。程序使用已安装的 Edge/Chrome，不自动下载浏览器或安装全局组件。当前工作区已按锁文件安装依赖；下载源码到其他电脑时仍需执行上述安装。本程序尚未启动独立浏览器或完成真实手机端到端验收。来源：[官方包](https://www.npmjs.com/package/playwright)、[持久浏览器和 Chrome/Edge 通道](https://playwright.dev/docs/api/class-browsertype#browser-type-launch-persistent-context)。
+依赖固定为官方 `playwright@1.64.1`，锁文件含官方 npm 地址和完整性校验（2026-10-16 核对）。程序使用已安装的 Edge/Chrome，不自动下载浏览器或安装全局组件。当前工作区已按锁文件安装依赖；下载源码到其他电脑时仍需执行上述安装。独立连接入口已完成本机实际查询，桥接程序尚未完成真实手机端到端验收。来源：[官方包](https://www.npmjs.com/package/playwright)、[持久浏览器和 Chrome/Edge 通道](https://playwright.dev/docs/api/class-browsertype#browser-type-launch-persistent-context)。
 
 ## 管理员配置
 
