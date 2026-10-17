@@ -1,17 +1,26 @@
 @echo off
+setlocal EnableExtensions DisableDelayedExpansion
 chcp 65001 >nul
 cd /d "%~dp0"
-where node >nul 2>nul
-if errorlevel 1 (
-  echo 请先安装 Node.js 20 或更新版本，再运行此程序。
-  pause
-  exit /b 1
-)
-if not exist "node_modules\playwright\package.json" (
-  echo 尚未安装依赖。请按本目录 README.md 的首次安装步骤操作。
-  pause
-  exit /b 1
-)
-echo 此入口只连接本机牵牛花，不需要 GitHub 或 Cloudflare 密钥。
-node connect.mjs
+set "QNH_NODE_EXE="
+for /f "delims=" %%N in ('where.exe node.exe 2^>nul') do if not defined QNH_NODE_EXE set "QNH_NODE_EXE=%%N"
+if not defined QNH_NODE_EXE for /f "tokens=2,*" %%A in ('reg.exe query "HKLM\SOFTWARE\Node.js" /v InstallPath 2^>nul') do if /i "%%A"=="REG_SZ" if exist "%%B\node.exe" set "QNH_NODE_EXE=%%B\node.exe"
+if not defined QNH_NODE_EXE for /f "tokens=2,*" %%A in ('reg.exe query "HKLM\SOFTWARE\WOW6432Node\Node.js" /v InstallPath 2^>nul') do if /i "%%A"=="REG_SZ" if exist "%%B\node.exe" set "QNH_NODE_EXE=%%B\node.exe"
+if not defined QNH_NODE_EXE goto node_missing
+if not exist "node_modules\playwright\package.json" goto dependencies_missing
+echo Connecting to QNH locally. No GitHub or Cloudflare key is required.
+"%QNH_NODE_EXE%" connect.mjs
+set "QNH_RESULT=%ERRORLEVEL%"
+goto finish
+:node_missing
+echo Node.js 20+ was not found. Install Node.js, then reopen this launcher.
+set "QNH_RESULT=1"
+goto finish
+:dependencies_missing
+echo Dependencies are missing. Follow local-query/README.md before running.
+set "QNH_RESULT=1"
+goto finish
+:finish
+echo.
 pause
+exit /b %QNH_RESULT%
