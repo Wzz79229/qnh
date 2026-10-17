@@ -29,6 +29,7 @@ const notConfigured = () => fail(503, 'QNH_BROWSER_NOT_CONFIGURED', '牵牛花�
 const expired = () => fail(401, 'QNH_BROWSER_SESSION_EXPIRED', '牵牛花登录会话已结束，请重新登录。');
 const invalid = () => fail(400, 'INVALID_QNH_BROWSER_INPUT', '登录操作格式无效。');
 const unauthenticated = () => ({ authorized: false, loginMethod: 'qnh_browser', status: 'login_required' });
+const warnDiagnostic = (phase, code) => console.warn('QNH_PHONE_DIAGNOSTIC', phase, code);
 
 function json(value, status = 200, extra = {}) {
   return new Response(JSON.stringify(value), { status, headers: {
@@ -148,13 +149,16 @@ function requireMutationOrigin(request, origin) {
 
 /** Public phone traffic never receives a provider URL, CDP capability or Cloudflare browser/session identifier. */
 export function createQnhPhoneRouter(env, { origin, now = () => Date.now(), cryptoImpl = globalThis.crypto,
-  confirmProductAccess } = {}) {
+  confirmProductAccess, diagnostic = warnDiagnostic } = {}) {
   let validOrigin = false;
   try { const url = new URL(origin); validOrigin = url.protocol === 'https:' && url.origin === origin; } catch { /* Fail closed. */ }
   const configured = validOrigin && browserConfigured(env, { confirmProductAccess });
   const call = async (token, path, body = {}) => {
     if (!configured) throw notConfigured();
-    if (!TOKEN.test(token || '')) throw expired();
+    if (!TOKEN.test(token || '')) {
+      diagnostic('NO_PHONE_COOKIE', 'QNH_BROWSER_SESSION_EXPIRED');
+      throw expired();
+    }
     const stub = env.QNH_PHONE_SESSIONS.get(env.QNH_PHONE_SESSIONS.idFromName(token));
     return stub.fetch(internalRequest(PHONE_INTERNAL, path, body));
   };
@@ -290,13 +294,16 @@ export class QnhBrowserBudget {
 
 /** One instance is addressed only by the 256-bit HttpOnly phone cookie; it never restores QNH credentials. */
 export class QnhPhoneSession {
-  constructor(state, env, { now = () => Date.now(), cryptoImpl = globalThis.crypto, browserFactory, confirmProductAccess } = {}) {
+  constructor(state, env, { now = () => Date.now(), cryptoImpl = globalThis.crypto, browserFactory, confirmProductAccess,
+    diagnostic = warnDiagnostic } = {}) {
     this.storage = state.storage; this.env = env; this.now = now; this.crypto = cryptoImpl;
     this.browserFactory = browserFactory; this.confirmProductAccess = confirmProductAccess;
+    this.diagnostic = diagnostic;
     this.controller = null; this.marker = null; this.boundTenantId = null; this.retired = false; this.queue = Promise.resolve();
     this.ready = Promise.all([this.storage.get('session'), this.storage.get('retired')]).then(([marker, retired]) => {
       this.marker = marker || null;
       this.retired = retired === true || Boolean(marker);
+      if (this.marker) this.diagnostic('RECONSTRUCTED_ACTIVE_MARKER', 'QNH_BROWSER_SESSION_EXPIRED');
     });
   }
   serial(operation) { const result = this.queue.then(() => this.ready).then(operation); this.queue = result.catch(() => {}); return result; }
@@ -326,16 +333,27 @@ export class QnhPhoneSession {
     }
   }
   async live() {
-    if (!this.controller || !this.marker || this.now() >= this.marker.expiresAt) { await this.stop(); throw expired(); }
+    const reason = !this.controller ? 'NO_CONTROLLER' : !this.marker ? 'NO_ACTIVE_MARKER'
+      : this.now() >= this.marker.expiresAt ? 'ABSOLUTE_DEADLINE' : null;
+    if (reason) {
+      this.diagnostic(reason, 'QNH_BROWSER_SESSION_EXPIRED');
+      await this.stop(); throw expired();
+    }
   }
   async publishStatus(value) {
     if (!ownObject(value) || typeof value.authorized !== 'boolean' || value.loginMethod !== 'qnh_browser'
       || value.status !== (value.authorized ? 'ready' : 'login') || !Number.isFinite(value.expiresAt)) throw unavailable();
     if (value.authorized) {
       if (typeof value.tenantId !== 'string' || !TENANT.test(value.tenantId)) { await this.stop(); throw unavailable(); }
-      if (this.boundTenantId && value.tenantId !== this.boundTenantId) { await this.stop(); throw expired(); }
+      if (this.boundTenantId && value.tenantId !== this.boundTenantId) {
+        this.diagnostic('BOUND_TENANT_CHANGED', 'QNH_BROWSER_SESSION_EXPIRED');
+        await this.stop(); throw expired();
+      }
       this.boundTenantId = value.tenantId;
-    } else if (this.boundTenantId) { await this.stop(); throw expired(); }
+    } else if (this.boundTenantId) {
+      this.diagnostic('BOUND_ACCESS_LOST', 'QNH_BROWSER_SESSION_EXPIRED');
+      await this.stop(); throw expired();
+    }
     this.marker.expiresAt = Math.min(this.marker.absoluteExpiresAt, value.expiresAt);
     await this.storage.put('session', this.marker);
     await this.storage.setAlarm(this.marker.expiresAt);
@@ -346,17 +364,21 @@ export class QnhPhoneSession {
   async start(ipHash) {
     if (this.controller) { await this.live(); return this.publishStatus(this.controller.publicStatus()); }
     // A cold/evicted object intentionally rejects the previous cookie; the public router can issue a fresh one.
-    if (this.retired || this.marker) { await this.stop(); throw expired(); }
+    if (this.retired || this.marker) {
+      this.diagnostic('RETIRED_START_COOKIE', 'QNH_BROWSER_SESSION_EXPIRED');
+      await this.stop(); throw expired();
+    }
     const factory = this.browserFactory || createCloudflareQnhBrowserFactory(this.env.BROWSER, {
       perTenant: this.env.QNH_TENANT_MODE === 'per_tenant',
       expectedTenantId: this.env.QNH_EXPECTED_TENANT_ID,
       probeSku: this.env.QNH_AUTH_PROBE_SKU,
       allowedDomains: (this.env.QNH_BROWSER_ALLOWED_DOMAINS || '').split(',').map(value => value.trim()).filter(Boolean),
       confirmProductAccess: this.confirmProductAccess,
+      diagnostic: this.diagnostic,
     });
     this.retired = true;
     await this.storage.put('retired', true);
-    this.controller = new ManagedQnhPhoneSession({ browserFactory: factory, now: this.now,
+    this.controller = new ManagedQnhPhoneSession({ browserFactory: factory, now: this.now, diagnostic: this.diagnostic,
       reserveBrowser: async ({ maximumMs }) => {
         const leaseId = createQnhPhoneCookie(this.crypto).token;
         const grant = await this.budget('/reserve', { leaseId, ipHash, maximumMs });
@@ -369,7 +391,7 @@ export class QnhPhoneSession {
         return { release: async () => { await this.budget('/release', { leaseId }); } };
       },
     });
-    try { return this.publishStatus(await this.controller.start()); }
+    try { return await this.publishStatus(await this.controller.start()); }
     catch (error) { await this.stop(); throw error; }
   }
   fetch(request) {
@@ -400,6 +422,10 @@ export class QnhPhoneSession {
         await this.live();
         return json(await this.publishStatus(result));
       } catch (error) {
+        if (error instanceof QnhBrowserError && error.code === 'QNH_BROWSER_SESSION_EXPIRED'
+          && this.controller?.state === 'closed' && this.marker) {
+          this.diagnostic('CONTROLLER_ALREADY_CLOSED', 'QNH_BROWSER_SESSION_EXPIRED');
+        }
         if (error instanceof QnhBrowserError && error.status >= 500) await this.stop();
         return errorResponse(error);
       }

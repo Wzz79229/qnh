@@ -8,6 +8,8 @@
 
 批次路径固定为私有 `Wzz79229/bzq` 的 `data/tenants/<已验证租户编号>/shelf-life.json`。不同租户使用不同文件，不读取或迁移旧共享 `data/shelf-life.json`。文件首次不存在时，已授权成员进入空工作区；第一个确认的批次用 `expectedSha:null` 创建文件，读取接口不会自动写入。新流程不提供旧商品库或照片接口，包装照片继续只在本机 OCR。
 
+每个页面在 `/api/session` 验证后绑定该租户，业务请求携带 `X-QNH-Tenant` 作为一致性断言。Worker 只与当前已验证租户比较，绝不用请求头选择数据文件；另一标签页改登录后，旧页面即使文件 SHA 相同也会被拒绝。页面恢复可见时先清空旧界面并重验，未同步草稿只有同租户重新验证后才能恢复。
+
 ## 会话和凭据
 
 每台手机持有随机 256 位 HttpOnly、Secure、SameSite=Strict Cookie，由 Worker 选择独立的 Durable Object。手机只接收 JPEG 画面和有限输入接口，不获得 CDP、Live View URL、浏览器 ID 或 Cloudflare/GitHub 凭据。所有登录 API 同源，写请求检查 Origin，GET 画面检查 Fetch metadata。
@@ -20,6 +22,8 @@
 
 ## 部署和验收
 
-Wrangler 声明 BROWSER、QNH_PHONE_SESSIONS 与 QNH_BROWSER_BUDGET 两个 SQLite DO，不需要新的 Cloudflare API token。原管理员 GitHub App Secret 继续由运行时保存，keep_vars 保留现有授权配置。旧 Pages 入口会转到同一个鲜期 Worker 主域，避免手机跨站 Cookie 问题。
+Wrangler 声明 BROWSER、QNH_PHONE_SESSIONS 与 QNH_BROWSER_BUDGET 两个 SQLite DO，不需要新的 Cloudflare API token。原管理员 GitHub App Secret 继续由运行时保存，keep_vars 保留现有授权配置。`keep_names=false` 避免 esbuild 名称辅助函数进入序列化的浏览器执行代码；部署回归测试会实际打包后再执行隔离页面表达式。旧 Pages 入口会转到同一个鲜期 Worker 主域，避免手机跨站 Cookie 问题。
+
+登录失败会保留窗口并显示固定安全提示。运行日志只记录固定操作和错误枚举，不记录输入、请求正文、上游异常正文、Cookie、浏览器编号或令牌；关闭自动请求日志与 traces。
 
 本地协议测试不等于真实登录成功。仍须现场确认云端官方页面可用，并由员工本人在鲜期窗口完成登录，验证实际租户、即时 SKU 查询、首次保存与另一租户隔离后，才可认定端到端验收完成。

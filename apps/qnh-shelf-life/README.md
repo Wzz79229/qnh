@@ -63,10 +63,12 @@ Cloudflare Git Build 根目录 `apps/qnh-shelf-life/backend`，构建命令只�
 
 ## 本地验证
 
-Node.js 20+，主 App 无需 npm install：
+Node.js 20+。启动主 App 不需要安装依赖；运行测试前用 `npm ci` 安装固定版本的开发测试工具（esbuild 仅用于验证 Worker 打包后的浏览器脚本，不随手机 App 加载）：
 
 ```powershell
 npm start
+# 运行回归测试
+npm ci
 npm test
 ```
 

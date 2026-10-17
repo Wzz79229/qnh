@@ -6,12 +6,13 @@ import * as core from '../dist/core.mjs';
 import { CloudStore } from '../dist/cloud.mjs';
 import { ConflictError } from '../dist/github.mjs';
 import { openQnhLoginViewer } from '../dist/qnh-login-viewer.mjs';
+import { syncPhotoState } from '../dist/photo-sync.mjs';
 
 // Run the actual app against a minimal document and the real CloudStore protocol.
 // No browser profile, production service, credentials, or stored data are used.
 const source = (await readFile(new URL('../dist/app.mjs', import.meta.url), 'utf8'))
   .replace(/^import .*?;\r?\n/gm, '');
-const entry = new vm.Script(`${source}\nglobalThis.testApp={autoConnect,isBusy:()=>busy,recordCount:()=>state.records.length};`);
+const entry = new vm.Script(`${source}\nglobalThis.testApp={autoConnect,loginExpired,render,isBusy:()=>busy,recordCount:()=>state.records.length,stageDraft:record=>{state.records.push(record);dirty=true;search='PRIVATE-SEARCH';category='PRIVATE-CATEGORY';pendingPhotos.set('synthetic-pending',{dataUrl:'data:image/jpeg;base64,synthetic'});},snapshot:()=>({tenant:workspaceTenant,lockedTenant:lockedDraft?.tenant??null,path:config.path,sha,dirty,search,category,photos:pendingPhotos.size,names:state.records.map(record=>record.name)})};`);
 const data = { schemaVersion: 1, records: [], settings: { urgentDays: 7, warningDays: 30 }, updatedAt: '2026-10-17T00:00:00.000Z' };
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -38,6 +39,7 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
       removeEventListener(name,callback){events.get(name)?.delete(callback);},
       emit(name,event={}){for(const callback of events.get(name)||[])callback({preventDefault(){},...event});},
       showModal(){this.open=true;},
+      click(){this.clicked=true;},
       close(){this.open=false;this.emit('close');},
       remove(){this.removed=true;},
     };viewerNodes.push(node);return node;
@@ -48,7 +50,9 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
     const handlers = new Map();
     const dialog = { id, innerHTML: html, open,
       close() { this.open=false; },
+      showModal() { this.open=true; },
       addEventListener: (name, listener) => handlers.set(name, listener),
+      removeEventListener(name,listener) { if(handlers.get(name)===listener)handlers.delete(name); },
       dispatchEvent(event) { handlers.get(event.type)?.(event); },
       cloneNode() { return makeDialog(id); },
       replaceWith(replacement) { dialogs.set(id,replacement); },
@@ -56,7 +60,7 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
     return dialog;
   };
   for(const id of ['record-dialog','confirm-dialog','import-dialog','conflict-dialog'])dialogs.set(id,makeDialog(id));
-  let activeSession = session, skuFlows = 0, viewerOpens = 0, viewerCloses = 0, viewerCallbacks;
+  let activeSession = session, skuFlows = 0, photoFlows = 0, lastSkuFlow, viewerOpens = 0, viewerCloses = 0, viewerCallbacks;
   const fetchImpl = async (url, init = {}) => {
     const path = new URL(url, 'https://app.example/').pathname;
     calls.push({ path, method: init.method || 'GET', body: init.body });
@@ -68,7 +72,7 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
       if(result.ok)activeSession={...activeSession,authorized:false};
       return result;
     }
-    if(path === '/api/state')return stateResponse ? await stateResponse() : json({ data, sha: 'test-sha' });
+    if(path === '/api/state')return stateResponse ? await stateResponse({session:activeSession,init}) : init.method==='PUT'?json({sha:'saved-sha'}):json({ data, sha: 'test-sha' });
     if(path === '/api/qnh/login/start')return json({authorized:false,loginMethod:'qnh_browser',status:'login',viewport:{width:1280,height:900},expiresAt:Date.now()+180000});
     if(path === '/api/qnh/login/frame')return new Response(new Uint8Array([255,216,255,217]),{headers:{'Content-Type':'image/jpeg'}});
     if(path === '/api/qnh/login/cancel')return json({});
@@ -86,9 +90,10 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
     CloudStore: class extends CloudStore { constructor(base) { super(base, fetchImpl); } },
     document, navigator: {}, location: { search:pageUrl.search, href:pageUrl.href, hostname:pageUrl.hostname, origin:pageUrl.origin, pathname:pageUrl.pathname, replace:target=>redirects.push(target) },
     window: { addEventListener: (name, listener) => windowListeners.set(name, listener), scrollTo() {} }, fetch: fetchImpl,
-    URL, URLSearchParams, Intl, FormData, Event, console,
+    URL, URLSearchParams, Intl, FormData, Event, Map, console, syncPhotoState,
     setInterval: () => 0, setTimeout: () => 0, clearTimeout() {},
-    openSkuFlow() { skuFlows++; },
+    openSkuFlow(options) { skuFlows++;lastSkuFlow=options; },
+    openPhotoFlow() { photoFlows++; },
     openQnhLoginViewer(callbacks) {
       viewerOpens++;viewerCallbacks=callbacks;
       if(realViewer)return openQnhLoginViewer(callbacks,{document,fetch:fetchImpl,timers:{setTimeout:()=>0,clearTimeout(){}},URL:{createObjectURL:()=> 'blob:synthetic-frame',revokeObjectURL(){}},AbortController});
@@ -100,6 +105,13 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
   return {
     body, calls, selectors, dialogs, redirects, main: () => selectors.get('#main').innerHTML,
     recordCount: () => context.testApp.recordCount(),
+    snapshot: () => context.testApp.snapshot(),
+    setHidden(value) { document.hidden=value; },
+    stageDraft: record => context.testApp.stageDraft(record),
+    expire() { context.testApp.loginExpired({code:'AUTH_REQUIRED'});context.testApp.render(); },
+    acceptOldProduct: product => lastSkuFlow?.onProduct(product),
+    photoFlows: () => photoFlows,
+    confirm: () => dialogs.get('confirm-dialog').dispatchEvent({type:'click',target:{closest:()=>({dataset:{confirm:'ok'}})}}),
     async settle() {
       for(let turn = 0; turn < 20 && context.testApp.isBusy(); turn++)await new Promise(resolve => setImmediate(resolve));
       assert.equal(context.testApp.isBusy(), false, 'startup should settle');
@@ -221,7 +233,7 @@ test('verified inline login automatically enters only after successful server da
   const read=new Promise(resolve=>{finishRead=resolve;});
   const app=harness({session:{configured:true,authorized:false,loginMethod:'qnh_browser',loginAvailable:true},stateResponse:()=>read});await app.settle();
   await app.click('qnh-login');
-  app.setSession({configured:true,authorized:true,loginMethod:'qnh_browser',loginAvailable:true});
+  app.setSession({configured:true,authorized:true,loginMethod:'qnh_browser',loginAvailable:true,tenantId:'7654321'});
   const completing=app.authorizeViewer();
   await new Promise(resolve=>setImmediate(resolve));
   assert.equal(app.body.classList.contains('login-required'),true);
@@ -401,5 +413,153 @@ test('an authorized first tenant read opens an empty workspace without creating 
   assert.equal(app.body.classList.contains('login-required'),false);
   assert.equal(app.recordCount(),0);
   assert.match(app.main(),/保质期总览/);
+  assert.equal(app.calls.some(call=>call.method==='PUT'),false);
+});
+
+const tenantSession=tenantId=>({configured:true,authorized:true,loginMethod:'qnh_browser',loginAvailable:true,tenantId});
+const tenantRecord=name=>core.validateRecord({name,productionDate:'2026-10-01',expiryDate:'2026-12-01',quantity:3,unit:'件'}).record;
+
+test('an expired A draft is erased before B read and is never merged or written into B', async () => {
+  let finishB;
+  const waitB=new Promise(resolve=>{finishB=resolve;});
+  const app=harness({session:tenantSession('111'),stateResponse:({session})=>session.tenantId==='111'?json({data,sha:'a-sha'}):waitB});await app.settle();
+  app.stageDraft(tenantRecord('PRIVATE-TENANT-A-DRAFT'));await app.click('add');
+  app.expire();
+  assert.equal(app.recordCount(),0);assert.equal(app.snapshot().sha,null);
+  assert.equal(app.snapshot().photos,0);assert.equal(app.snapshot().search,'');
+  assert.equal(app.snapshot().lockedTenant,'111');
+  assert.equal(app.snapshot().path,'');
+  assert.doesNotMatch(app.main(),/PRIVATE-TENANT-A/);
+  app.setSession(tenantSession('222'));
+  const switching=app.login();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.recordCount(),0);assert.equal(app.snapshot().lockedTenant,null);
+  assert.equal(app.body.classList.contains('login-required'),true);
+  app.acceptOldProduct({sku:'old-a-product',name:'PRIVATE-TENANT-A-PRODUCT'});
+  assert.equal(app.photoFlows(),0,'an old SKU callback must not open a product editor in B');
+  const bData={...data,records:[tenantRecord('TENANT-B-RECORD')]};
+  finishB(json({data:bData,sha:'b-sha'}));await switching;await app.settle();
+  assert.equal(app.snapshot().tenant,'222');assert.equal(app.snapshot().dirty,false);
+  assert.equal(app.snapshot().path,'data/tenants/222/shelf-life.json');
+  assert.deepEqual(Array.from(app.snapshot().names),['TENANT-B-RECORD']);
+  assert.doesNotMatch(app.main(),/PRIVATE-TENANT-A/);
+  assert.equal(app.calls.some(call=>call.method==='PUT'),false);
+  await app.click('team');
+  assert.match(app.main(),/data\/tenants\/222\/shelf-life\.json/);
+  assert.doesNotMatch(app.main(),/data\/tenants\/111\//);
+});
+
+test('the same verified tenant can recover and save its own unsynced draft', async () => {
+  const app=harness({session:tenantSession('111')});await app.settle();
+  app.stageDraft(tenantRecord('TENANT-A-OWN-DRAFT'));app.expire();
+  assert.equal(app.recordCount(),0);
+  await app.login();await app.settle();
+  assert.equal(app.snapshot().tenant,'111');
+  assert.equal(app.recordCount(),1);assert.equal(app.snapshot().lockedTenant,null);
+  const writes=app.calls.filter(call=>call.method==='PUT');
+  assert.equal(writes.length,1);
+  assert.equal(JSON.parse(writes[0].body).data.records[0].name,'TENANT-A-OWN-DRAFT');
+});
+
+test('a changed tenant cannot recover A even when B state fails to load', async () => {
+  const app=harness({session:tenantSession('111'),stateResponse:({session})=>session.tenantId==='111'?json({data,sha:'a-sha'}):json({message:'synthetic read failure'},503)});await app.settle();
+  app.stageDraft(tenantRecord('PRIVATE-A-DRAFT'));app.expire();app.setSession(tenantSession('222'));
+  await app.login();await app.settle();
+  assert.equal(app.body.classList.contains('login-required'),true);
+  assert.equal(app.recordCount(),0);assert.equal(app.snapshot().lockedTenant,null);
+  assert.equal(app.snapshot().sha,null);assert.equal(app.snapshot().photos,0);
+  assert.equal(app.calls.some(call=>call.method==='PUT'),false);
+  assert.doesNotMatch(app.main(),/PRIVATE-A/);
+});
+
+test('authorized QNH sessions with absent, numeric, zero-prefixed or malformed tenant fail closed', async () => {
+  for(const tenantId of [undefined,null,111,'','0','0111','-1','111/222','1'.repeat(21)]){
+    const app=harness({session:tenantSession(tenantId)});await app.settle();
+    assert.equal(app.body.classList.contains('login-required'),true);
+    assert.equal(app.recordCount(),0);assert.equal(app.snapshot().tenant,null);
+    assert.equal(app.calls.some(call=>call.path==='/api/state'),false);
+  }
+});
+
+test('logout permanently erases a tenant draft instead of recovering it on the next login', async () => {
+  const app=harness({session:tenantSession('111')});await app.settle();
+  app.stageDraft(tenantRecord('DISCARDED-ON-LOGOUT'));
+  const leaving=app.click('disconnect');app.confirm();await leaving;
+  assert.equal(app.snapshot().lockedTenant,null);assert.equal(app.snapshot().tenant,null);
+  assert.equal(app.snapshot().path,'');
+  app.setSession(tenantSession('111'));await app.login();await app.settle();
+  assert.equal(app.recordCount(),0);
+  assert.equal(app.calls.some(call=>call.method==='PUT'),false);
+});
+
+test('a cross-tab TENANT_CHANGED response immediately locks and erases the prior visible tenant', async () => {
+  let reads=0;
+  const app=harness({session:tenantSession('111'),stateResponse:()=>++reads===1?json({data:{...data,records:[tenantRecord('PRIVATE-PRIOR-TENANT')]},sha:'a-sha'}):json({code:'TENANT_CHANGED',message:'tenant changed'},401)});await app.settle();
+  await app.click('refresh');await app.settle();
+  assert.equal(app.body.classList.contains('login-required'),true);
+  assert.equal(app.recordCount(),0);assert.equal(app.snapshot().tenant,null);assert.equal(app.snapshot().path,'');
+  assert.doesNotMatch(app.main(),/PRIVATE-PRIOR-TENANT/);
+});
+
+test('a backup file body that arrives after switching tenants cannot open confirmation or restore into B', async () => {
+  let finishText;
+  const text=new Promise(resolve=>{finishText=resolve;});
+  const app=harness({session:tenantSession('111')});await app.settle();
+  await app.click('restore-backup');
+  const input=app.viewerNodes.filter(node=>node.tagName==='input').at(-1);
+  input.files=[{size:100,text:()=>text}];const restoring=input.onchange();
+  app.expire();app.setSession(tenantSession('222'));await app.login();await app.settle();
+  finishText(JSON.stringify({...data,records:[tenantRecord('PRIVATE-A-BACKUP')]}));await restoring;
+  assert.equal(app.recordCount(),0);assert.equal(app.snapshot().tenant,'222');assert.equal(app.snapshot().dirty,false);
+  assert.equal(app.dialogs.get('confirm-dialog').open,false);
+  assert.equal(app.calls.some(call=>call.method==='PUT'),false);
+});
+
+test('a backup confirmation left over from A cannot restore after B is verified', async () => {
+  const app=harness({session:tenantSession('111')});await app.settle();
+  await app.click('restore-backup');
+  const input=app.viewerNodes.filter(node=>node.tagName==='input').at(-1);
+  input.files=[{size:100,text:async()=>JSON.stringify({...data,records:[tenantRecord('PRIVATE-A-CONFIRMED-BACKUP')]})}];
+  const restoring=input.onchange();await new Promise(resolve=>setImmediate(resolve));
+  const oldConfirmation=app.dialogs.get('confirm-dialog');assert.equal(oldConfirmation.open,true);
+  app.expire();app.setSession(tenantSession('222'));await app.login();await app.settle();
+  oldConfirmation.dispatchEvent({type:'click',target:{closest:()=>({dataset:{confirm:'ok'}})}});await restoring;
+  assert.equal(app.recordCount(),0);assert.equal(app.snapshot().tenant,'222');assert.equal(app.snapshot().dirty,false);
+  assert.equal(app.calls.some(call=>call.method==='PUT'),false);
+});
+
+test('returning to a dirty workspace closes its dialog and rechecks tenant before displaying B', async () => {
+  let finishB;
+  const bRead=new Promise(resolve=>{finishB=resolve;});
+  const app=harness({session:tenantSession('111'),stateResponse:({session})=>session.tenantId==='111'?json({data,sha:'a-sha'}):bRead});await app.settle();
+  app.stageDraft(tenantRecord('PRIVATE-A-VISIBILITY-DRAFT'));
+  const oldDialog=app.dialogs.get('record-dialog');oldDialog.innerHTML='PRIVATE-A-DETAIL';oldDialog.open=true;
+  app.setHidden(true);app.emitDocument('visibilitychange');
+  app.setSession(tenantSession('222'));app.setHidden(false);
+  const rechecking=app.emitDocument('visibilitychange');
+  assert.equal(app.body.classList.contains('login-required'),true);
+  assert.equal(app.recordCount(),0);assert.equal(oldDialog.open,false);
+  assert.equal(app.selectors.get('#toast').textContent,'');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.snapshot().lockedTenant,null);
+  finishB(json({data:{...data,records:[tenantRecord('B-VISIBILITY-RECORD')]},sha:'b-sha'}));await rechecking;await app.settle();
+  assert.deepEqual(Array.from(app.snapshot().names),['B-VISIBILITY-RECORD']);
+  assert.equal(app.calls.some(call=>call.method==='PUT'),false);
+});
+
+test('visibility locks immediately during an old refresh and ignores its late A response', async () => {
+  let finishOldRead,reads=0;
+  const oldRead=new Promise(resolve=>{finishOldRead=resolve;});
+  const app=harness({session:tenantSession('111'),stateResponse:({session})=>{
+    reads++;
+    if(reads===1)return json({data:{...data,records:[tenantRecord('PRIVATE-A-INITIAL')]},sha:'a-sha'});
+    if(reads===2)return oldRead;
+    return json({data:{...data,records:[tenantRecord('B-AFTER-REFRESH')]},sha:'b-sha'});
+  }});await app.settle();
+  await app.click('refresh');
+  app.setSession(tenantSession('222'));app.emitDocument('visibilitychange');
+  assert.equal(app.recordCount(),0);assert.equal(app.body.classList.contains('login-required'),true);
+  finishOldRead(json({data:{...data,records:[tenantRecord('PRIVATE-LATE-A')]},sha:'late-a-sha'}));await app.settle();
+  assert.deepEqual(Array.from(app.snapshot().names),['B-AFTER-REFRESH']);
+  assert.equal(app.snapshot().tenant,'222');
   assert.equal(app.calls.some(call=>call.method==='PUT'),false);
 });

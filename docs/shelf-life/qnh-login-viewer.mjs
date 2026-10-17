@@ -16,7 +16,7 @@ const ERROR_MESSAGES = Object.freeze({
   QNH_BROWSER_INPUT_RATE: '操作较快，请稍候再输入。',
   INVALID_QNH_BROWSER_INPUT: '当前登录操作无效，请重新操作。',
 });
-const FATAL_CODES = new Set(['QNH_BROWSER_DEMO_LIMIT', 'QNH_BROWSER_START_RATE', 'QNH_BROWSER_ORIGIN_DENIED', 'QNH_BROWSER_NOT_CONFIGURED']);
+const FATAL_CODES = new Set(['QNH_BROWSER_DEMO_LIMIT', 'QNH_BROWSER_START_RATE', 'QNH_BROWSER_ORIGIN_DENIED', 'QNH_BROWSER_NOT_CONFIGURED', 'QNH_BROWSER_UNAVAILABLE']);
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const exactKeys = (value, keys) => object(value) && Object.keys(value).length === keys.length && Object.keys(value).every(key => keys.includes(key));
 
@@ -186,6 +186,9 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
         const error = new Error('request-failed');
         error.expired = response.status === 401 || response.status === 410;
         error.code = await safeErrorCode(response);
+        // Fixed operation names and public codes only; never log input, response text or session identifiers.
+        const phase = path === '/api/qnh/login/start' ? 'start' : path === '/api/qnh/login/frame' ? 'frame' : path === '/api/qnh/login/verify' ? 'verify' : 'input';
+        console.warn('QNH_LOGIN_REQUEST_FAILED', phase, response.status, error.code || 'UNKNOWN');
         const retry = response.headers?.get('Retry-After');
         if (/^\d{1,5}$/u.test(retry || '') && Number(retry) > 0 && Number(retry) <= 86_400) error.retryAfter = Number(retry);
         throw error;

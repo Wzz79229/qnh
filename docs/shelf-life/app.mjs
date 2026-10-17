@@ -20,9 +20,10 @@ let state = emptyState();
 let page = 'overview', filter = 'all', search = '', category = '', sort = 'expiry', limit = 60;
 let store = null, sha = null, connected = false, dirty = false, busy = false, demo = false, errorText = '', lastSync = '';
 let installPrompt = null, toastTimer;
-let config = {owner:'Wzz79229',repo:'bzq',branch:'main',path:'data/shelf-life.json',actor:'团队成员'};
+let config = {owner:'Wzz79229',repo:'bzq',branch:'main',path:'',actor:'团队成员'};
 let connectionIssue = '', needsLogin = false, loginMethod = '', sessionChecked = false, logoutPending = null;
 let qnhLoginAvailable = false, qnhViewer = null, qnhViewerOpening = false, qnhViewerGeneration = 0;
+let workspaceTenant = null, lockedDraft = null, workspaceGeneration = 0, sessionRecheckPending = false;
 const pendingPhotos = new Map();
 const workspaceOpen = () => demo || connected;
 function loginIssue(error) {
@@ -30,13 +31,36 @@ function loginIssue(error) {
   if(error.code==='INVALID_PASSWORD')return '团队访问口令不正确，请重新输入。';
   if(error.code==='LOGIN_RATE_LIMIT')return '登录尝试次数较多，请稍后再试。';
   if(error.code==='NETWORK_ERROR')return '暂时无法连接，请检查网络后重试。';
-  if(['AUTH_REQUIRED','UNAUTHORIZED'].includes(error.code))return loginMethod==='legacy'?'请先登录团队。':'登录已失效，请重新登录。';
+  if(['AUTH_REQUIRED','UNAUTHORIZED','TENANT_CHANGED'].includes(error.code))return loginMethod==='legacy'?'请先登录团队。':'登录已失效，请重新登录。';
   return '暂时无法进入保质期管理，请稍后重试或联系管理员。';
 }
 function loginExpired(error) {
-  if(!['AUTH_REQUIRED','UNAUTHORIZED','QNH_LOGIN_NOT_CONNECTED'].includes(error.code))return false;
+  if(!['AUTH_REQUIRED','UNAUTHORIZED','TENANT_CHANGED','QNH_LOGIN_NOT_CONNECTED'].includes(error.code))return false;
   if(error.code==='QNH_LOGIN_NOT_CONNECTED')loginMethod='qnh_pending';
-  connected=false;needsLogin=loginMethod==='legacy';connectionIssue=loginIssue(error);return true;
+  lockWorkspace(true);needsLogin=loginMethod==='legacy';connectionIssue=loginIssue(error);return true;
+}
+function clearWorkspaceDialogs() {
+  for(const dialog of document.querySelectorAll('dialog')){
+    if(dialog.id==='qnh-login-viewer')continue;
+    if(dialog.open)dialog.close();
+    dialog.dispatchEvent(new Event('close'));
+    dialog.replaceWith(dialog.cloneNode(false));
+  }
+}
+function lockWorkspace(preserveDraft=false) {
+  // Keep an unsaved draft private until the same server-verified tenant returns.
+  // It is never displayed or merged while the tenant is unknown or different.
+  if(preserveDraft&&dirty&&workspaceTenant)lockedDraft={tenant:workspaceTenant,state,sha,photos:new Map(pendingPhotos)};
+  else if(!preserveDraft)lockedDraft=null;
+  connected=false;workspaceTenant=null;workspaceGeneration++;state=emptyState();sha=null;dirty=false;
+  pendingPhotos.clear();errorText='';lastSync='';page='overview';filter='all';search='';category='';limit=60;
+  config.path='';
+  clearTimeout(toastTimer);const toast=$('#toast');toast.textContent='';toast.className='toast';
+  clearWorkspaceDialogs();
+}
+function resumeSessionRecheck() {
+  if(!sessionRecheckPending)return;
+  sessionRecheckPending=false;autoConnect();
 }
 function loginHTML() {
   const checking = busy || !sessionChecked;
@@ -162,7 +186,7 @@ function field(name,label,value='',options={}) {
 }
 function teamHTML() {
   return heading('团队与同步','扫 SKU 建档，打开后自动连接团队。','','CONNECTED TOGETHER')+banners()+
-    `<div class="team-layout"><div><section class="card"><h2>团队数据连接</h2><div class="connection-static">数据仓库：<b>Wzz79229 / bzq</b><br>数据文件：<code>data/shelf-life.json</code></div><div class="separator"></div>${connected?`<div class="team-status"><strong>已自动连接团队</strong><span>最后同步：${e(lastSync||'刚刚')}</span><div class="action-row" style="margin-top:12px"><button class="button small soft" data-action="refresh">${icon('refresh')}拉取最新</button>${dirty?'<button class="button small primary" data-action="sync">保存批次草稿</button>':''}<button class="button small ghost" data-action="disconnect">退出团队</button></div></div>`:needsLogin?`<p class="card-description">在此设备登录一次团队，下次打开会尝试自动连接。不需要 GitHub 令牌。</p><form id="team-login-form"><label class="field"><span>团队访问口令</span><input name="password" type="password" required autocomplete="current-password"></label><div id="connection-error" class="form-error" role="alert"></div><div class="form-actions"><button class="button primary" type="submit">登录团队</button></div></form>`:`<div class="notice warning"><p>${e(connectionIssue||'正在连接团队…')}</p></div><button class="button soft" data-action="auto-connect">${icon('refresh')}重新检查连接</button>`}<p class="form-note">成员不需要填写仓库信息或 GitHub 令牌。管理员在后台完成一次授权后，应用才能自动读取私有数据。</p></section><section class="card settings-card"><h2>批次数据备份</h2><p class="card-description">保存失败时，请保持页面打开并备份批次数据。新批次不包含识别照片；历史备份仍可恢复。</p><button class="button" data-action="export-json">${icon('down')}下载完整备份</button><button class="button" data-action="restore-backup">恢复历史备份</button></section></div><section class="card"><span class="panel-eyebrow">PHOTO FIRST</span><h2 style="margin-top:10px">扫描 SKU，拍日期，填件数</h2><ol class="step-list"><li><b>扫描 SKU</b>实时查询并核对牵牛花商品名称、规格和图片。</li><li><b>拍日期和保质期</b>拍清生产日期和保质期，系统自动计算到期日期。</li><li><b>清点后填件数</b>按同一生产日期分别记录，识别缺失或冲突时请补拍。</li><li><b>自动保存到团队</b>授权后台连接成功后，仅批次数据保存到私有 bzq，识别照片不会上传或保存。</li></ol><button class="button primary" data-action="add">${icon('camera')}扫描 SKU 开始</button><div class="separator"></div><button class="text-button" data-action="install">${icon('down')}添加到手机桌面</button></section></div>`;
+    `<div class="team-layout"><div><section class="card"><h2>团队数据连接</h2><div class="connection-static">数据仓库：<b>Wzz79229 / bzq</b><br>数据文件：<code>${e(config.path||'登录后确定')}</code></div><div class="separator"></div>${connected?`<div class="team-status"><strong>已自动连接团队</strong><span>最后同步：${e(lastSync||'刚刚')}</span><div class="action-row" style="margin-top:12px"><button class="button small soft" data-action="refresh">${icon('refresh')}拉取最新</button>${dirty?'<button class="button small primary" data-action="sync">保存批次草稿</button>':''}<button class="button small ghost" data-action="disconnect">退出团队</button></div></div>`:needsLogin?`<p class="card-description">在此设备登录一次团队，下次打开会尝试自动连接。不需要 GitHub 令牌。</p><form id="team-login-form"><label class="field"><span>团队访问口令</span><input name="password" type="password" required autocomplete="current-password"></label><div id="connection-error" class="form-error" role="alert"></div><div class="form-actions"><button class="button primary" type="submit">登录团队</button></div></form>`:`<div class="notice warning"><p>${e(connectionIssue||'正在连接团队…')}</p></div><button class="button soft" data-action="auto-connect">${icon('refresh')}重新检查连接</button>`}<p class="form-note">成员不需要填写仓库信息或 GitHub 令牌。管理员在后台完成一次授权后，应用才能自动读取私有数据。</p></section><section class="card settings-card"><h2>批次数据备份</h2><p class="card-description">保存失败时，请保持页面打开并备份批次数据。新批次不包含识别照片；历史备份仍可恢复。</p><button class="button" data-action="export-json">${icon('down')}下载完整备份</button><button class="button" data-action="restore-backup">恢复历史备份</button></section></div><section class="card"><span class="panel-eyebrow">PHOTO FIRST</span><h2 style="margin-top:10px">扫描 SKU，拍日期，填件数</h2><ol class="step-list"><li><b>扫描 SKU</b>实时查询并核对牵牛花商品名称、规格和图片。</li><li><b>拍日期和保质期</b>拍清生产日期和保质期，系统自动计算到期日期。</li><li><b>清点后填件数</b>按同一生产日期分别记录，识别缺失或冲突时请补拍。</li><li><b>自动保存到团队</b>授权后台连接成功后，仅批次数据保存到私有 bzq，识别照片不会上传或保存。</li></ol><button class="button primary" data-action="add">${icon('camera')}扫描 SKU 开始</button><div class="separator"></div><button class="text-button" data-action="install">${icon('down')}添加到手机桌面</button></section></div>`;
 }
 function render(preserveFocus=false) {
   let position,focus;
@@ -170,14 +194,7 @@ function render(preserveFocus=false) {
   updateChrome();
   if(!workspaceOpen()){
     closeQnhLoginViewer();
-    for(const dialog of document.querySelectorAll('dialog')){
-      if(dialog.id==='qnh-login-viewer')continue;
-      if(dialog.open)dialog.close();
-      // Run photo/camera close cleanup even for a dialog already closed, then
-      // discard its contents and old callbacks before another user can enter.
-      dialog.dispatchEvent(new Event('close'));
-      dialog.replaceWith(dialog.cloneNode(false));
-    }
+    clearWorkspaceDialogs();
     $('#main').innerHTML=loginHTML();return;
   }
   $('#main').innerHTML = page==='overview'?overviewHTML():page==='team'?teamHTML():page==='scan'?scanHTML():batchesHTML(page==='tasks');
@@ -196,17 +213,21 @@ function confirmAction(title,message,actionText='继续',danger=false) {
 }
 function recordDialog(record=null,selectedProduct=null) {
   if(!workspaceOpen())return;
+  const generation=workspaceGeneration,tenant=workspaceTenant;
+  const current=()=>workspaceOpen()&&generation===workspaceGeneration&&tenant===workspaceTenant;
   if(!selectedProduct){
     if(demo){notify('示例体验不查询真实牵牛花，请退出示例并连接团队后扫码。');return;}
     if(!connected||!store){go('team');notify('先连接团队，再实时查询牵牛花。',true);return;}
-    openSkuFlow({initialSku:record?.productSku||'',lookup:(sku,options)=>lookupSku(store,sku,options),onProduct:product=>recordDialog(record,product)});return;
+    openSkuFlow({initialSku:record?.productSku||'',lookup:(sku,options)=>lookupSku(store,sku,options),onProduct:product=>{if(current())recordDialog(record,product);}});return;
   }
   openPhotoFlow({existingRecord:record,selectedProduct,canSync:connected,dateOnly:true,requireProduct:true,onSave:async({parsed,quantity,existingRecord,selectedProduct:product})=>{
+    if(!current())throw new Error('登录状态已变更，请重新查询商品后建档。');
     if(!product||!parsed.productionDate||!parsed.shelfLife)throw new Error('请先查询 SKU，并拍清生产日期和保质期。');
     const input={...existingRecord,name:product.name,spec:product.spec||'',category:product.category||'',productSku:product.sku,productSpu:product.spu,barcode:'',productionDate:parsed.productionDate,shelfLife:parsed.shelfLife,shelfUnit:parsed.shelfUnit,expiryDate:parsed.expiryDate,quantity:validateBatchQuantity(quantity),unit:'件',updatedAt:now(),photoRefs:existingRecord?.photoRefs||[]};
     const validated=validateRecord(input);if(!validated.valid)throw new Error(validated.errors.join('；'));
     const r=validated.record;
     if(!existingRecord&&records().some(v=>v.productSku===r.productSku&&v.productionDate===r.productionDate)&&!await confirmAction('相同 SKU 和生产日期已有批次','请核对是否重复清点。只有确认是另外一批商品时再新增，现有件数不会自动合并。','确认新增批次'))return false;
+    if(!current())throw new Error('登录状态已变更，请重新查询商品后建档。');
     state.records=existingRecord?state.records.map(v=>v.id===existingRecord.id?r:v):[r,...state.records];
     await changed('生产日期、保质期和件数已保存');return true;
   }});
@@ -221,10 +242,11 @@ function viewRecord(r) {
 async function changed(success) { state.updatedAt=now();dirty=true;errorText='';render();if(demo){dirty=false;notify(`${success}（示例）`);render();return;}if(connected)await save(success);else notify('已保留本页草稿，连接仓库后才能同步'); }
 async function save(success='已同步到 GitHub') {
   if(!store||!connected||busy||demo)return;
+  const generation=workspaceGeneration;
   busy=true;updateChrome();
-  try{const saved=await syncPhotoState(store,sanitizeState(state),sha,pendingPhotos,{onSha:next=>{sha=next;}});sha=saved.sha;dirty=false;pendingPhotos.clear();errorText='';lastSync=new Date().toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit'});notify(success);}
-  catch(err){if(loginExpired(err)){errorText='';notify(connectionIssue,true);}else{errorText=err.message;notify(err.message,true);if(err instanceof ConflictError)conflictDialog();}}
-  finally{busy=false;render();}
+  try{const saved=await syncPhotoState(store,sanitizeState(state),sha,pendingPhotos,{onSha:next=>{if(generation===workspaceGeneration)sha=next;}});if(generation!==workspaceGeneration)return;sha=saved.sha;dirty=false;pendingPhotos.clear();errorText='';lastSync=new Date().toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit'});notify(success);}
+  catch(err){if(generation!==workspaceGeneration)return;if(loginExpired(err)){errorText='';notify(connectionIssue,true);}else{errorText=err.message;notify(err.message,true);if(err instanceof ConflictError)conflictDialog();}}
+  finally{busy=false;render();resumeSessionRecheck();}
 }
 function conflictDialog() {
   if($('#conflict-dialog').open)return;
@@ -235,13 +257,14 @@ async function refresh(silent=false,discard=false) {
   // Never advance the shared SHA underneath an editor that still holds an old record.
   if(silent && (document.querySelector('dialog[open]') || document.activeElement?.matches('input,select,textarea')))return;
   if(dirty&&!discard){if(silent)return;if(!await confirmAction('载入团队最新数据','本页有未同步的草稿。建议先导出备份。继续载入将替换本页记录。','载入最新'))return;}
+  const generation=workspaceGeneration;
   busy=true;updateChrome();
-  try{const latest=await store.read();if(latest.data===null)throw new Error('团队数据文件已被移除，请先确认仓库中的数据文件。');const incoming=sanitizeState(latest.data);if(latest.sha!==sha||discard){state=incoming;sha=latest.sha;dirty=false;errorText='';if(!silent)notify('已载入团队最新数据');render();}else if(!silent)notify('已经是团队最新版本');lastSync=new Date().toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit'});}
-  catch(err){if(loginExpired(err)){errorText='';render();}else if(!silent){errorText=err.message;notify(err.message,true);render();}}
-  finally{busy=false;if(workspaceOpen())updateChrome();else render();}
+  try{const latest=await store.read();if(generation!==workspaceGeneration)return;if(latest.data===null)throw new Error('团队数据文件已被移除，请先确认仓库中的数据文件。');const incoming=sanitizeState(latest.data);if(latest.sha!==sha||discard){state=incoming;sha=latest.sha;dirty=false;errorText='';if(!silent)notify('已载入团队最新数据');render();}else if(!silent)notify('已经是团队最新版本');lastSync=new Date().toLocaleTimeString('zh-CN',{timeZone:'Asia/Shanghai',hour:'2-digit',minute:'2-digit'});}
+  catch(err){if(generation!==workspaceGeneration)return;if(loginExpired(err)){errorText='';render();}else if(!silent){errorText=err.message;notify(err.message,true);render();}}
+  finally{busy=false;if(workspaceOpen())updateChrome();else render();resumeSessionRecheck();}
 }
 async function autoConnect(password) {
-  if(busy||demo||password&&loginMethod!=='legacy')return;qnhLoginAvailable=false;busy=true;render();
+  if(busy||demo||password&&loginMethod!=='legacy')return;lockWorkspace(true);qnhLoginAvailable=false;busy=true;render();
   try {
     if(logoutPending){await logoutPending.logout();logoutPending=null;}
     if(!store){const response=await fetch('./connection.json',{cache:'no-store'});if(!response.ok)throw new Error('无法读取团队连接设置。');const settings=await response.json();store=new CloudStore(settings.apiBase);}
@@ -258,11 +281,19 @@ async function autoConnect(password) {
     if(loginMethod==='qnh_pending'){needsLogin=false;connected=false;connectionIssue='牵牛花登录连接尚未接通。';return;}
     needsLogin=session.authorized!==true&&loginMethod==='legacy';
     if(session.authorized!==true){connectionIssue=needsLogin?'请先登录团队。':qnhLoginAvailable?'请在鲜期内登录牵牛花。':'牵牛花登录连接尚未接通。';connected=false;return;}
+    const tenant=loginMethod==='qnh_browser'?session.tenantId:'legacy';
+    if(loginMethod==='qnh_browser'&&(typeof tenant!=='string'||!/^[1-9][0-9]{0,19}$/.test(tenant))){
+      const error=new Error('无法确认牵牛花所属商家，请重新登录。');error.code='AUTH_REQUIRED';throw error;
+    }
+    if(lockedDraft&&lockedDraft.tenant!==tenant)lockedDraft=null;
     const incoming=await store.read();
     if(!incoming.data&&!(incoming.data===null&&incoming.sha===null))throw new Error('团队数据文件格式无法确认。');
     // An authorized first read of an absent file is an empty workspace. The
     // first confirmed batch creates it with expectedSha:null; GET never writes.
     const remote=incoming.data===null?emptyState():sanitizeState(incoming.data);let shouldSave=false;
+    workspaceTenant=tenant;
+    config.path=tenant==='legacy'?'data/shelf-life.json':`data/tenants/${tenant}/shelf-life.json`;
+    if(lockedDraft){state=lockedDraft.state;sha=lockedDraft.sha;dirty=true;for(const [id,photo] of lockedDraft.photos)pendingPhotos.set(id,photo);lockedDraft=null;}
     if(dirty){
       if(sha&&sha!==incoming.sha){connected=true;throw new ConflictError();}
       const remoteById=new Map(remote.records.map(r=>[r.id,r]));
@@ -278,15 +309,20 @@ async function autoConnect(password) {
 function download(text,name,mime='text/plain;charset=utf-8') { const url=URL.createObjectURL(new Blob([text],{type:mime}));const link=document.createElement('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),20000); }
 function exportJSON() {download(JSON.stringify({...state,photoAttachments:[...pendingPhotos.values()]},null,2),`鲜期-批次数据备份-${todayISO()}.json`,'application/json;charset=utf-8');notify('已导出记录与本页照片草稿');}
 function restorePhotoBackup() {
+  const generation=workspaceGeneration,tenant=workspaceTenant;
+  const current=()=>workspaceOpen()&&generation===workspaceGeneration&&tenant===workspaceTenant;
   const input=document.createElement('input');input.type='file';input.accept='.json';
   input.onchange=async()=>{const file=input.files?.[0];if(!file)return;
     try{
+      if(!current())return;
       if(file.size>50*1024*1024)throw new Error('备份超过 50 MB，请联系管理员恢复。');
-      const raw=JSON.parse(await file.text()),backup=sanitizeState(raw);
+      const text=await file.text();if(!current())return;
+      const raw=JSON.parse(text),backup=sanitizeState(raw);
       const attachments=raw.photoAttachments??[];if(!Array.isArray(attachments)||attachments.length>200)throw new Error('照片草稿格式或数量无效。');
       const wanted=new Set(backup.records.flatMap(r=>(r.photoRefs||[]).map(p=>p.id)));const restored=new Map();
       for(const p of attachments){const size=previewByteLength(p?.dataUrl);if(!p||!wanted.has(p.id)||restored.has(p.id)||size===null||size>300*1024||!p.dataUrl.startsWith('data:image/jpeg;base64,/9j/'))throw new Error('备份中的照片不完整或格式无效。');restored.set(p.id,{id:p.id,dataUrl:p.dataUrl,width:p.width,height:p.height});}
       if(!await confirmAction('恢复为本页照片草稿','将替换本页记录与未上传照片，不会立即覆盖团队。请先备份当前草稿，恢复后再连接团队核对同步。','恢复草稿'))return;
+      if(!current())return;
       state=backup;pendingPhotos.clear();for(const [id,p] of restored)pendingPhotos.set(id,p);dirty=true;sha=null;connected=false;demo=false;errorText='';connectionIssue='照片备份已恢复为本页草稿，请连接团队后核对同步。';render();notify('已恢复照片草稿，尚未上传');
     }catch(error){notify(error.message,true);}
   };input.click();
@@ -342,7 +378,7 @@ document.addEventListener('click',async ev=>{
     if(dirty&&!await confirmAction('退出团队','本页有未同步照片，请先备份。退出后将清除本页记录与照片草稿。','退出团队'))return;
     // Lock and erase the local workspace before any network operation. A failed
     // remote logout is retried before the next session check, never as access.
-    logoutPending=store;store=null;connected=false;demo=false;sha=null;state=emptyState();pendingPhotos.clear();dirty=false;errorText='';lastSync='';needsLogin=false;busy=true;page='overview';filter='all';search='';category='';limit=60;render();
+    logoutPending=store;store=null;demo=false;lockWorkspace();needsLogin=false;busy=true;render();
     try{await logoutPending?.logout();logoutPending=null;needsLogin=loginMethod==='legacy';connectionIssue=needsLogin?'请先登录团队。':qnhLoginAvailable?'请在鲜期内登录牵牛花。':'牵牛花登录连接尚未接通。';notify('已退出团队');}
     catch{connectionIssue='本机已退出，账号退出尚未完成，请检查网络后重新检查。';notify(connectionIssue,true);}
     finally{busy=false;render();}
@@ -373,7 +409,11 @@ window.addEventListener('beforeinstallprompt',ev=>{ev.preventDefault();installPr
 window.addEventListener('online',()=>{notify('网络已恢复');if(connected&&!dirty)refresh(true);});
 window.addEventListener('offline',()=>{notify('当前离线，操作将暂留本页，联网后请同步',true);updateChrome();});
 setInterval(()=>{if(connected&&!dirty&&!busy&&!document.hidden&&!document.querySelector('dialog[open]'))refresh(true);},60000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&connected&&!dirty&&!document.querySelector('dialog[open]'))refresh(true);});
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden||demo||qnhViewer||qnhViewerOpening||!workspaceTenant&&!lockedDraft)return;
+  if(busy){sessionRecheckPending=true;lockWorkspace(true);render();return;}
+  return autoConnect();
+});
 if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});
 if(new URLSearchParams(location.search).get('demo')==='1'){demo=true;state=demoState();}
 render();

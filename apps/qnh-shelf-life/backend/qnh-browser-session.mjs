@@ -25,6 +25,15 @@ const notConfigured = () => failure(503, 'QNH_BROWSER_NOT_CONFIGURED', '牵牛�
 const invalidInput = () => failure(400, 'INVALID_QNH_BROWSER_INPUT', '登录操作格式无效。');
 const closed = () => failure(401, 'QNH_BROWSER_SESSION_EXPIRED', '牵牛花登录会话已结束，请重新登录。');
 const unavailable = () => failure(502, 'QNH_BROWSER_UNAVAILABLE', '牵牛花连接暂时不可用，请重新登录。');
+const browserDiagnostic = (phase, code) => console.warn('QNH_BROWSER_DIAGNOSTIC', phase, code);
+const CDP_DIAGNOSTIC_METHODS = new Set(['Page.enable', 'Runtime.enable', 'Network.enable', 'Network.setCacheDisabled',
+  'Network.setBypassServiceWorker', 'Network.getResponseBody', 'Emulation.setDeviceMetricsOverride', 'Runtime.evaluate',
+  'Page.navigate', 'Page.getFrameTree', 'Page.captureScreenshot', 'Input.dispatchMouseEvent', 'Input.insertText', 'Input.dispatchKeyEvent']);
+const diagnosticMethod = method => CDP_DIAGNOSTIC_METHODS.has(method) ? method : 'UNKNOWN_CDP_METHOD';
+const diagnosticErrorCode = error => error instanceof QnhBrowserError
+  && ['QNH_BROWSER_NOT_CONFIGURED', 'QNH_BROWSER_UNAVAILABLE', 'QNH_BROWSER_SESSION_EXPIRED',
+    'QNH_BROWSER_DEMO_LIMIT', 'QNH_BROWSER_START_RATE'].includes(error.code)
+  ? error.code : 'PROVIDER_FAILURE';
 
 export function createQnhPhoneCookie(cryptoImpl = globalThis.crypto) {
   if (typeof cryptoImpl?.getRandomValues !== 'function') throw notConfigured();
@@ -89,9 +98,10 @@ function validTenantId(value) {
  * All operations are serialized; verification immediately freezes further input and drains accepted input first.
  */
 export class ManagedQnhPhoneSession {
-  constructor({ browserFactory, reserveBrowser, now = () => Date.now() } = {}) {
+  constructor({ browserFactory, reserveBrowser, now = () => Date.now(), diagnostic = browserDiagnostic } = {}) {
     if (typeof browserFactory !== 'function' || typeof reserveBrowser !== 'function' || typeof now !== 'function') throw notConfigured();
     this.browserFactory = browserFactory; this.reserveBrowser = reserveBrowser; this.now = now;
+    this.diagnostic = diagnostic;
     this.queue = Promise.resolve(); this.state = 'new'; this.browser = null; this.reservation = null;
     this.createdAt = 0; this.authorizedAt = 0; this.lastFrameAt = -Infinity; this.lastInputAt = -Infinity; this.inputCount = 0;
     this.frozen = false; this.verification = null;
@@ -137,6 +147,7 @@ export class ManagedQnhPhoneSession {
         await this.ensureAlive();
         return this.publicStatus();
       } catch (error) {
+        this.diagnostic('MANAGED_START', diagnosticErrorCode(error));
         await this.end();
         if (error instanceof QnhBrowserError) throw error;
         throw unavailable();
@@ -164,7 +175,7 @@ export class ManagedQnhPhoneSession {
           || frame[0] !== 0xff || frame[1] !== 0xd8 || frame.at(-2) !== 0xff || frame.at(-1) !== 0xd9) throw unavailable();
         await this.ensureAlive();
         return frame;
-      } catch (error) { await this.end(); throw error instanceof QnhBrowserError ? error : unavailable(); }
+      } catch (error) { this.diagnostic('MANAGED_FRAME', diagnosticErrorCode(error)); await this.end(); throw error instanceof QnhBrowserError ? error : unavailable(); }
     });
   }
 
@@ -180,7 +191,7 @@ export class ManagedQnhPhoneSession {
       await this.ensureAlive();
       if (this.state !== 'login') throw failure(409, 'QNH_BROWSER_INPUT_FROZEN', '正在确认登录，请稍候。');
       try { await this.browser.input(input); await this.ensureAlive(); return { accepted: true }; }
-      catch (error) { await this.end(); throw error instanceof QnhBrowserError ? error : unavailable(); }
+      catch (error) { this.diagnostic('MANAGED_INPUT', diagnosticErrorCode(error)); await this.end(); throw error instanceof QnhBrowserError ? error : unavailable(); }
     });
   }
 
@@ -200,7 +211,7 @@ export class ManagedQnhPhoneSession {
         if (this.state !== 'authorized') this.authorizedAt = this.now();
         this.state = 'authorized';
         return this.publicStatus();
-      } catch (error) { await this.end(); throw error instanceof QnhBrowserError ? error : unavailable(); }
+      } catch (error) { this.diagnostic('MANAGED_VERIFY', diagnosticErrorCode(error)); await this.end(); throw error instanceof QnhBrowserError ? error : unavailable(); }
     }).finally(() => { this.verification = null; });
     return this.verification;
   }
@@ -224,7 +235,7 @@ export class ManagedQnhPhoneSession {
         if (result.status === 'found') return resolveExactSku({ complete: true, rows: [result.product] }, sku);
         return { status: result.status, message: result.status === 'not_found' ? '牵牛花中没有此 SKU，请核对标签。'
           : result.status === 'ambiguous' ? '牵牛花返回多个不同商品，请核对 SKU。' : '商品资料尚未确认，请重试。' };
-      } catch (error) { await this.end(); throw error instanceof QnhBrowserError ? error : unavailable(); }
+      } catch (error) { this.diagnostic('MANAGED_LOOKUP', diagnosticErrorCode(error)); await this.end(); throw error instanceof QnhBrowserError ? error : unavailable(); }
     });
   }
 
@@ -232,22 +243,25 @@ export class ManagedQnhPhoneSession {
 }
 
 /** CDP capabilities remain in the server closure; provider errors are intentionally discarded. */
-function createPrivateCdp(socket) {
+function createPrivateCdp(socket, diagnostic = browserDiagnostic) {
   let nextId = 0; let ended = false;
   const pending = new Map();
   const listeners = new Map();
-  const stop = () => {
+  const stop = (reason = 'CLOSED') => {
     ended = true;
-    for (const item of pending.values()) { clearTimeout(item.timeout); item.reject(unavailable()); }
+    for (const item of pending.values()) {
+      diagnostic(diagnosticMethod(item.method), reason);
+      clearTimeout(item.timeout); item.reject(unavailable());
+    }
     pending.clear();
     listeners.clear();
   };
-  socket.addEventListener('close', stop);
-  socket.addEventListener('error', stop);
+  socket.addEventListener('close', () => stop('CLOSED'));
+  socket.addEventListener('error', () => stop('SOCKET_ERROR'));
   socket.addEventListener('message', event => {
-    if (typeof event.data !== 'string' || event.data.length > 4_000_000) { stop(); socket.close(); return; }
+    if (typeof event.data !== 'string' || event.data.length > 4_000_000) { stop('MALFORMED_MESSAGE'); socket.close(); return; }
     let message;
-    try { message = JSON.parse(event.data); } catch { stop(); socket.close(); return; }
+    try { message = JSON.parse(event.data); } catch { stop('MALFORMED_MESSAGE'); socket.close(); return; }
     if (typeof message.method === 'string') {
       for (const listener of listeners.get(message.method) || []) {
         try { listener(message.params || {}); } catch { /* Events cannot expose provider diagnostics. */ }
@@ -257,8 +271,13 @@ function createPrivateCdp(socket) {
     const item = pending.get(message.id);
     if (!item) return;
     pending.delete(message.id); clearTimeout(item.timeout);
-    if (message.error || !object(message.result)) item.reject(unavailable());
-    else item.resolve(message.result);
+    if (message.error || !object(message.result)) {
+      diagnostic(diagnosticMethod(item.method), message.error ? 'PROTOCOL_ERROR' : 'INVALID_RESULT');
+      item.reject(unavailable());
+    } else {
+      if (item.method === 'Runtime.evaluate' && message.result.exceptionDetails) diagnostic('Runtime.evaluate', 'EVALUATION_EXCEPTION');
+      item.resolve(message.result);
+    }
   });
   return {
     on(method, listener) {
@@ -267,13 +286,13 @@ function createPrivateCdp(socket) {
       return () => listeners.get(method)?.delete(listener);
     },
     send(method, params = {}) {
-      if (ended) return Promise.reject(unavailable());
+      if (ended) { diagnostic(diagnosticMethod(method), 'ALREADY_CLOSED'); return Promise.reject(unavailable()); }
       return new Promise((resolve, reject) => {
         const id = ++nextId;
-        const timeout = setTimeout(() => { pending.delete(id); reject(unavailable()); }, QNH_BROWSER_LIMITS.commandMs);
-        pending.set(id, { resolve, reject, timeout });
+        const timeout = setTimeout(() => { pending.delete(id); diagnostic(diagnosticMethod(method), 'TIMEOUT'); reject(unavailable()); }, QNH_BROWSER_LIMITS.commandMs);
+        pending.set(id, { resolve, reject, timeout, method });
         try { socket.send(JSON.stringify({ id, method, params })); }
-        catch { pending.delete(id); clearTimeout(timeout); reject(unavailable()); }
+        catch { pending.delete(id); clearTimeout(timeout); diagnostic(diagnosticMethod(method), 'SEND_FAILURE'); reject(unavailable()); }
       });
     },
     close() { stop(); try { socket.close(); } catch { /* Already disconnected. */ } },
@@ -368,7 +387,7 @@ function validateDomains(input) {
  * The factory fails before allocating without an expected tenant, policy and probe/hook.
  */
 export function createCloudflareQnhBrowserFactory(binding, { expectedTenantId, readTenantId = readObservedQnhTenantId,
-  confirmProductAccess, allowedDomains, probeSku, perTenant = false } = {}) {
+  confirmProductAccess, allowedDomains, probeSku, perTenant = false, diagnostic = browserDiagnostic } = {}) {
   const tenantId = perTenant === true ? null : validTenantId(expectedTenantId);
   const domains = validateDomains(allowedDomains);
   if (typeof binding?.acquire !== 'function' || typeof binding?.connectSession !== 'function'
@@ -376,17 +395,21 @@ export function createCloudflareQnhBrowserFactory(binding, { expectedTenantId, r
     || typeof readTenantId !== 'function' || typeof confirmProductAccess !== 'function' && !probeSku && perTenant !== true) throw notConfigured();
   const proofSku = probeSku ? normalizeSku(probeSku) : null;
   return async () => {
-    let browserSessionId; let cdp;
+    let browserSessionId; let cdp; let phase = 'ACQUIRE';
     try {
       const acquired = await binding.acquire({ keepAlive: 60_000, recording: false, guardrails: { allowedDomains: domains } });
       if (!object(acquired) || typeof acquired.sessionId !== 'string' || !acquired.sessionId || acquired.sessionId.length > 200) throw unavailable();
       browserSessionId = acquired.sessionId;
+      phase = 'NEW_TARGET';
       const target = await binding.devtools.newTarget(browserSessionId, 'about:blank');
       if (!object(target) || typeof target.id !== 'string' || !target.id || target.id.length > 200) throw unavailable();
+      phase = 'CONNECT_SESSION';
       const connection = await binding.connectSession(browserSessionId, { targetId: target.id });
+      phase = 'OPEN_SOCKET';
       const response = await connection.webSocket.fetch('https://browser-binding.invalid', { headers: { Upgrade: 'websocket' } });
       if (!response.webSocket) throw unavailable();
-      response.webSocket.accept(); cdp = createPrivateCdp(response.webSocket);
+      response.webSocket.accept(); cdp = createPrivateCdp(response.webSocket, diagnostic);
+      phase = 'CDP_SETUP';
       await cdp.send('Page.enable');
       await cdp.send('Runtime.enable');
       await cdp.send('Network.enable', { maxTotalBufferSize: 4_000_000, maxResourceBufferSize: 2_000_000 });
@@ -506,6 +529,7 @@ export function createCloudflareQnhBrowserFactory(binding, { expectedTenantId, r
         },
       };
     } catch {
+      diagnostic(phase, 'FACTORY_UNAVAILABLE');
       cdp?.close();
       if (browserSessionId) try { await binding.closeSession(browserSessionId); } catch { /* Safe generic failure only. */ }
       throw unavailable();

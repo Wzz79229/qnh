@@ -449,6 +449,17 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
           if (qnhLoginRequired(env)) throw new ApiError(503, 'QNH_LOGIN_NOT_CONNECTED', '牵牛花员工手机登录尚未接通，暂不能读取或保存批次。');
           throw new ApiError(401, 'AUTH_REQUIRED', '请先输入团队访问密码。');
         }
+        if (phoneStatus) {
+          // This is an assertion of the tenant already bound to this tab's data. It never selects a repository path.
+          // A cookie may have changed in another tab; matching Git blob SHAs (including two absent files) cannot detect that.
+          const expectedTenant = request.headers.get('X-QNH-Tenant');
+          if (typeof expectedTenant !== 'string' || !/^[1-9][0-9]{0,19}$/.test(expectedTenant)) {
+            throw new ApiError(401, 'AUTH_REQUIRED', '请重新确认牵牛花登录后再操作。');
+          }
+          if (expectedTenant !== phoneStatus.tenantId) {
+            throw new ApiError(401, 'TENANT_CHANGED', '当前登录的租户已变化，请重新登录并加载对应批次。');
+          }
+        }
         // New phone sessions never read shared historical catalogs or photos.
         // Batches are isolated by the trusted server-side tenant, not client fields.
         if (phoneStatus && (url.pathname.startsWith('/api/catalog') || url.pathname.startsWith('/api/photos'))) {

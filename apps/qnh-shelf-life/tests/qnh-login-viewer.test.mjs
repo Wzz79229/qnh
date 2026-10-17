@@ -303,3 +303,21 @@ test('an expired frame also keeps its explanation visible and clears the last sc
   assert.deepEqual(app.revoked, app.created); assert.equal(app.tag('img').src, ''); assert.equal(app.timers.size, 0);
   app.handle.close();
 });
+
+
+test('a terminal provider failure is kept instead of polling again and replacing it with expiry', async () => {
+  const app = harness({ fetch(path) {
+    if (path.endsWith('/verify')) return new Response(JSON.stringify({ code: 'QNH_BROWSER_UNAVAILABLE', message: 'synthetic-private-detail' }), { status: 502 });
+  } });
+  await settle(); await app.advance(5000);
+  assert.match(app.status(), /连接暂时不可用/);
+  assert.doesNotMatch(app.status(), /synthetic-private-detail/);
+  assert.equal(app.tag('dialog').open, true);
+  assert.equal(app.tag('input').disabled, true);
+  assert.equal(app.timers.size, 0);
+  const frames = app.requestCount('/api/qnh/login/frame');
+  await app.advance(60000);
+  assert.equal(app.requestCount('/api/qnh/login/frame'), frames);
+  assert.equal(app.requestCount('/api/qnh/login/verify'), 1);
+  app.handle.close();
+});

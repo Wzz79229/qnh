@@ -41,7 +41,8 @@ function setup(options = {}) {
   const now = () => time;
   const budgetStorage = new Storage();
   const budget = new QnhBrowserBudget({ storage: budgetStorage }, {}, { now });
-  const calls = { phoneGet: 0, budgetGet: 0, acquisitions: 0, frames: 0, inputs: [], probes: 0, lookups: [], closes: 0, internal: [] };
+  const calls = { phoneGet: 0, budgetGet: 0, acquisitions: 0, frames: 0, inputs: [], probes: 0, lookups: [], closes: 0, internal: [], diagnostics: [] };
+  const diagnostic = (phase, code) => calls.diagnostics.push([phase, code]);
   const phones = new Map();
   const browsers = [];
   const env = {
@@ -71,7 +72,7 @@ function setup(options = {}) {
     browsers.push(browser);
     return browser;
   };
-  const makePhone = storage => new QnhPhoneSession({ storage }, env, { now, cryptoImpl: webcrypto, browserFactory: factory });
+  const makePhone = storage => new QnhPhoneSession({ storage }, env, { now, cryptoImpl: webcrypto, browserFactory: factory, diagnostic });
   env.QNH_PHONE_SESSIONS = {
     idFromName: name => name,
     get(name) {
@@ -86,7 +87,7 @@ function setup(options = {}) {
       } };
     },
   };
-  const router = createQnhPhoneRouter(env, { origin: ORIGIN, now, cryptoImpl: webcrypto });
+  const router = createQnhPhoneRouter(env, { origin: ORIGIN, now, cryptoImpl: webcrypto, diagnostic });
   return { env, router, calls, browsers, phones, budget, budgetStorage, now, advance(ms) { time += ms; },
     evict(cookie) {
       const entry = phones.get(cookie.split('=')[1]);
@@ -155,6 +156,44 @@ test('GET frame accepts the browser-typical absent Origin but rejects document/c
     assert.equal((await h.router.handle(phoneRequest('frame', { cookie, ...extra }))).status, 403);
   }
   assert.equal(h.calls.frames, 1);
+});
+
+test('expiry diagnostics distinguish missing cookie, lost in-memory controller, and deadline using fixed enums only', async () => {
+  const missing = setup();
+  await missing.router.handle(phoneRequest('start'));
+  const withoutCookie = await missing.router.handle(phoneRequest('frame'));
+  assert.equal(withoutCookie.status, 401);
+  assert.deepEqual(missing.calls.diagnostics, [['NO_PHONE_COOKIE', 'QNH_BROWSER_SESSION_EXPIRED']]);
+
+  const evicted = setup();
+  const oldCookie = cookieOf(await evicted.router.handle(phoneRequest('start')));
+  evicted.evict(oldCookie);
+  assert.equal((await evicted.router.handle(phoneRequest('frame', { cookie: oldCookie }))).status, 401);
+  assert.deepEqual(evicted.calls.diagnostics, [
+    ['RECONSTRUCTED_ACTIVE_MARKER', 'QNH_BROWSER_SESSION_EXPIRED'], ['NO_CONTROLLER', 'QNH_BROWSER_SESSION_EXPIRED'],
+  ]);
+
+  const deadline = setup();
+  const expiredCookie = cookieOf(await deadline.router.handle(phoneRequest('start')));
+  deadline.advance(180_000);
+  assert.equal((await deadline.router.handle(phoneRequest('frame', { cookie: expiredCookie }))).status, 401);
+  assert.deepEqual(deadline.calls.diagnostics, [['ABSOLUTE_DEADLINE', 'QNH_BROWSER_SESSION_EXPIRED']]);
+  for (const h of [missing, evicted, deadline]) {
+    const printed = JSON.stringify(h.calls.diagnostics);
+    assert.equal(printed.includes('192.0.2.'), false);
+    assert.equal(printed.includes('__Host-qnh-phone'), false);
+    assert.equal(printed.includes('http'), false);
+    assert.equal(printed.includes(SKU), false);
+  }
+});
+
+test('a controller which closed independently is diagnosed without logging its browser capability', async () => {
+  const h = setup();
+  const cookie = cookieOf(await h.router.handle(phoneRequest('start')));
+  await h.phones.get(cookie.split('=')[1]).instance.controller.close();
+  const result = await h.router.handle(phoneRequest('frame', { cookie }));
+  assert.equal(result.status, 401);
+  assert.deepEqual(h.calls.diagnostics, [['CONTROLLER_ALREADY_CLOSED', 'QNH_BROWSER_SESSION_EXPIRED']]);
 });
 
 test('wrong methods, query strings, non-JSON, excess bytes and unexpected start fields are rejected without allocation', async () => {

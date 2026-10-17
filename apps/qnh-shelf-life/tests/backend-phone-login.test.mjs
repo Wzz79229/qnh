@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { webcrypto } from 'node:crypto';
 import { createWorker } from '../backend/worker.mjs';
 import { QNH_PHONE_COOKIE } from '../backend/qnh-browser-session.mjs';
+import { CloudStore } from '../dist/cloud.mjs';
 
 const ORIGIN = 'https://qnh-shelf-life-api.w792294944.workers.dev';
 const PAGES = 'https://wzz79229.github.io';
@@ -57,9 +58,11 @@ function harness({ initiallyAuthorized = false, tenantId = TENANT_A, statusReply
     if (!networkReply) throw new Error('unexpected GitHub access');
     return typeof networkReply === 'function' ? networkReply(url, options) : networkReply;
   } });
-  const request = (path, { method = 'GET', cookie, body, origin = ORIGIN, site = 'same-origin', dest = 'empty', headers = {}, environment = env } = {}) => {
+  const request = (path, { method = 'GET', cookie, body, origin = ORIGIN, site = 'same-origin', dest = 'empty', headers = {}, environment = env,
+    tenantHeader = cookie && !['/api/session', '/api/login', '/api/logout'].includes(path) ? cookie.includes(SECOND_PHONE) ? TENANT_B : TENANT_A : null } = {}) => {
     const reqHeaders = { ...(origin ? { Origin: origin } : {}), ...(site ? { 'Sec-Fetch-Site': site } : {}),
       ...(dest ? { 'Sec-Fetch-Dest': dest } : {}), ...(cookie ? { Cookie: cookie } : {}),
+      ...(tenantHeader === null ? {} : { 'X-QNH-Tenant': tenantHeader }),
       ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...headers };
     return worker.fetch(new Request(`${ORIGIN}${path}`, { method, headers: reqHeaders,
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}) }), environment);
@@ -192,6 +195,56 @@ test('request parameters and headers cannot select another tenant or restore the
   assert.equal(read.status, 200);
   assert.equal(h.calls.github.length, 1);
   assert.equal(new URL(h.calls.github[0].url).pathname, `/repos/Wzz79229/bzq/contents/data/tenants/${TENANT_A}/shelf-life.json`);
+});
+
+test('all protected phone routes reject missing or invalid tenant assertions before repository access', async () => {
+  const h = harness({ initiallyAuthorized: true });
+  const routes = [
+    ['/api/state', {}], ['/api/state', { method: 'PUT', body: { data: state(), expectedSha: null } }],
+    ['/api/qnh/queries', { method: 'POST', body: { sku: SKU } }], ['/api/qnh/queries/old-query', {}],
+    ['/api/catalog', {}], ['/api/catalog/pages/0', {}], ['/api/photos', { method: 'POST', body: {} }],
+    ['/api/photos/36b8f84d-df4e-4d49-b662-bcde71a8764f', {}],
+  ];
+  for (const [path, options] of routes) {
+    const result = await h.request(path, { ...options, cookie: PHONE_COOKIE, tenantHeader: null });
+    assert.equal(result.status, 401);
+    assert.equal((await result.json()).code, 'AUTH_REQUIRED');
+  }
+  for (const tenantHeader of ['0', '../1012619', '1012619,97654321', '9'.repeat(21)]) {
+    const result = await h.request('/api/state', { cookie: PHONE_COOKIE, tenantHeader });
+    assert.equal(result.status, 401);
+    assert.equal((await result.json()).code, 'AUTH_REQUIRED');
+  }
+  assert.equal(h.calls.github.length, 0);
+  assert.equal(h.calls.phone.some(value => value.path === '/lookup'), false);
+});
+
+test('an assertion from a different tenant is rejected without selecting that tenant storage path', async () => {
+  const h = harness({ initiallyAuthorized: true });
+  const result = await h.request('/api/state', { cookie: PHONE_COOKIE, tenantHeader: TENANT_B });
+  assert.equal(result.status, 401);
+  assert.equal((await result.json()).code, 'TENANT_CHANGED');
+  assert.equal(h.calls.github.length, 0);
+});
+
+test('a stale tab cannot save A draft into B after shared-cookie login changes, even with two absent files or equal blob SHAs', async () => {
+  for (const expectedSha of [null, SHA]) {
+    const h = harness({ statusReply: phone => response({ authorized: true, loginMethod: 'qnh_browser', status: 'ready',
+      tenantId: phone === PHONE ? TENANT_A : TENANT_B }) });
+    let browserCookie = PHONE_COOKIE;
+    const browserFetch = (url, options) => h.worker.fetch(new Request(url, { ...options, headers: {
+      ...options.headers, Cookie: browserCookie, Origin: ORIGIN, 'Sec-Fetch-Site': 'same-origin', 'Sec-Fetch-Dest': 'empty',
+    } }), h.env);
+    const tabA = new CloudStore(ORIGIN, browserFetch);
+    assert.equal((await tabA.session()).tenantId, TENANT_A);
+    browserCookie = `${QNH_PHONE_COOKIE}=${SECOND_PHONE}`;
+    const tabB = new CloudStore(ORIGIN, browserFetch);
+    assert.equal((await tabB.session()).tenantId, TENANT_B);
+    const draftA = { ...state(), settings: { urgentDays: 3, warningDays: 30 } };
+    await assert.rejects(tabA.write(draftA, expectedSha), error => error.code === 'TENANT_CHANGED' && error.status === 401);
+    assert.equal(h.calls.github.length, 0, 'neither tenant batch file may be read or written on a stale-tab request');
+    assert.equal(h.calls.phone.at(-1).phone, SECOND_PHONE);
+  }
 });
 
 test('shared catalog and photo endpoints stay unavailable to phone sessions without touching GitHub', async () => {

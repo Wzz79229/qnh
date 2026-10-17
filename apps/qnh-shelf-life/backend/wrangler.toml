@@ -6,6 +6,22 @@ workers_dev = true
 preview_urls = false
 # Preserve administrator-managed runtime App IDs during GitHub-triggered builds.
 keep_vars = true
+# Browser DOM readers are serialized with Function.toString() and run in QNH.
+# Name-preserving helpers belong to the Worker bundle, not that remote page.
+keep_names = false
+
+# Fixed diagnostic enums only. Disable invocation/request logs and automatic traces.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = false
+
+[observability.traces]
+enabled = false
 
 [vars]
 ALLOWED_ORIGIN = "https://wzz79229.github.io"
