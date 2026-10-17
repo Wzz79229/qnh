@@ -23,7 +23,7 @@ function element() {
 }
 function harness({ session = { configured: true, authorized: false, loginMethod: 'qnh_pending' }, stateResponse, logoutResponse, search = '' } = {}) {
   const selectors = new Map(['#main', '.desktop-nav', '.bottom-nav', '#page-label', '#sync-pill', '#user-avatar', '#toast'].map(key => [key, element()]));
-  const body = element(), listeners = new Map(), calls = [];
+  const body = element(), listeners = new Map(), windowListeners = new Map(), calls = [];
   const dialogs = new Map();
   const makeDialog = (id, html='', open=false) => {
     const handlers = new Map();
@@ -61,7 +61,7 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
   const context = vm.createContext({ ...core, ConflictError,
     CloudStore: class extends CloudStore { constructor(base) { super(base, fetchImpl); } },
     document, navigator: {}, location: { search, href: `https://app.example/${search}`, hostname: 'app.example' },
-    window: { addEventListener() {}, scrollTo() {} }, fetch: fetchImpl,
+    window: { addEventListener: (name, listener) => windowListeners.set(name, listener), scrollTo() {} }, fetch: fetchImpl,
     URL, URLSearchParams, Intl, FormData, Event, console,
     setInterval: () => 0, setTimeout: () => 0, clearTimeout() {},
     openSkuFlow() { skuFlows++; },
@@ -76,21 +76,59 @@ function harness({ session = { configured: true, authorized: false, loginMethod:
     },
     login: password => context.testApp.autoConnect(password),
     click: action => listeners.get('click')({ target: { closest: () => ({ dataset: { action } }) } }),
+    clickOfficialLink: () => listeners.get('click')({ target: { closest: () => null } }),
+    emitWindow: name => windowListeners.get(name)?.({ type: name }),
+    emitDocument: name => listeners.get(name)?.({ type: name }),
     skuFlows: () => skuFlows,
   };
 }
 
-test('QNH pending shows one disabled login entry without business UI or an outside login loop', async () => {
+test('QNH pending opens only the fixed official login page and keeps business UI locked', async () => {
   const app = harness();await app.settle();
   assert.equal(app.body.classList.contains('login-required'), true);
   assert.match(app.main(), /牵牛花登录连接尚未接通/);
-  assert.match(app.main(), /disabled>登录牵牛花/);
-  assert.doesNotMatch(app.main(), /GitHub|GITHUB_|bzq|data-page|team-login-form|<a\b|https:\/\/qnh/);
+  assert.match(app.main(), /<a class="button primary login-button" href="https:\/\/qnh\.meituan\.com\/" target="_blank" rel="noopener noreferrer">打开牵牛花登录<\/a>/);
+  assert.match(app.main(), /登录后自动进入保质期管理尚未接通/);
+  assert.doesNotMatch(app.main(), /GitHub|GITHUB_|bzq|data-page|team-login-form|disabled>登录牵牛花/);
+  const hrefs = [...app.main().matchAll(/href="([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(hrefs.filter(href => !href.startsWith('#')), ['https://qnh.meituan.com/']);
   assert.equal(app.selectors.get('.bottom-nav').innerHTML, '');
   assert.equal(app.calls.some(call => call.path === '/api/state'), false);
   await app.click('add');
   assert.equal(app.skuFlows(), 0);
   assert.equal(app.calls.length, 2);
+});
+
+test('the official login link waits for the initial server check', async () => {
+  const app = harness();
+  assert.match(app.main(), /disabled>正在检查登录/);
+  assert.doesNotMatch(app.main(), /<a\b|打开牵牛花登录/);
+  await app.settle();
+  assert.match(app.main(), /打开牵牛花登录/);
+});
+
+test('opening the official page and returning never grants app access or reads business data', async () => {
+  const app = harness();await app.settle();
+  await app.clickOfficialLink();
+  app.emitWindow('focus');app.emitDocument('visibilitychange');
+  await app.settle();
+  assert.equal(app.calls.length, 2);
+  assert.equal(app.body.classList.contains('login-required'), true);
+  assert.equal(app.calls.some(call => call.path === '/api/state'), false);
+  await app.click('auto-connect');await app.settle();
+  assert.equal(app.calls.filter(call => call.path === '/api/session').length, 2);
+  assert.equal(app.calls.some(call => call.path === '/api/login' || call.path === '/api/state'), false);
+  assert.equal(app.body.classList.contains('login-required'), true);
+  assert.match(app.main(), /打开牵牛花登录/);
+});
+
+test('a pending integration cannot authorize access or override the official login destination', async () => {
+  const app = harness({ session: { configured: true, authorized: true, loginMethod: 'qnh_pending', loginUrl: 'https://untrusted.example/?token=synthetic-secret', message: 'fake login complete' } });
+  await app.settle();
+  assert.match(app.main(), /href="https:\/\/qnh\.meituan\.com\/"/);
+  assert.doesNotMatch(app.main(), /untrusted|token=|synthetic-secret|fake login complete/);
+  assert.equal(app.calls.some(call => call.path === '/api/state'), false);
+  assert.equal(app.body.classList.contains('login-required'), true);
 });
 
 test('only boolean authorized true can begin reading business data', async () => {
