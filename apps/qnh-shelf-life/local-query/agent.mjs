@@ -1,7 +1,7 @@
-import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createVisibleQnhAdapter, normalizeSku, sanitizeProduct, QNH_PRODUCT_URL } from './extract.mjs';
+import { browserConfiguration, acquireProfileLock } from './browser.mjs';
 
 export const DEFAULT_API = 'https://qnh-shelf-life-api.w792294944.workers.dev';
 const STATUSES = new Set(['found', 'not_found', 'ambiguous', 'login_required', 'error']);
@@ -20,10 +20,7 @@ export function configuration(env = process.env) {
   if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash || !['', '/'].includes(base.pathname)) throw new Error('INVALID_API_BASE');
   const key = env.QNH_CONNECTOR_KEY;
   if (typeof key !== 'string' || key.length < 32 || key.length > 512 || !/^[A-Za-z0-9._~+/-]+=*$/u.test(key)) throw new Error('CONNECTOR_KEY_REQUIRED');
-  const channel = env.QNH_BROWSER || 'msedge';
-  if (!['msedge', 'chrome'].includes(channel)) throw new Error('INVALID_BROWSER');
-  const profile = resolve(join(env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local'), 'QnhShelfLife', `QueryBrowser-${channel}`));
-  return { apiBase: base.origin, key, channel, profile, pollMs: 2000, requestMs: 8000 };
+  return { apiBase: base.origin, key, ...browserConfiguration(env), pollMs: 2000, requestMs: 8000 };
 }
 
 async function responseJson(response) {
@@ -178,7 +175,9 @@ export async function main(env = process.env) {
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   let context;
+  let profileLock;
   try {
+    profileLock = await acquireProfileLock(config.profile);
     context = await chromium.launchPersistentContext(config.profile, {
       channel: config.channel, headless: false, viewport: null,
     });
@@ -189,12 +188,14 @@ export async function main(env = process.env) {
     await runAgent({ config, adapter: createVisibleQnhAdapter(page), signal: controller.signal, notify: status => {
       if (NOTICES[status]) console.log(NOTICES[status]);
     } });
-  } catch {
-    console.error('本机查询程序未能继续。请确认已安装所选 Chrome/Edge，且没有其他程序占用本工具的独立浏览器目录。');
+  } catch (error) {
+    if (error?.code === 'PROFILE_IN_USE') console.error('连接牵牛花或启动查询程序已经运行，请先关闭正在运行的程序和它的独立浏览器。');
+    else console.error('本机查询程序未能继续。请确认已安装所选 Chrome/Edge，且没有其他程序占用本工具的独立浏览器目录。');
     process.exitCode = 1;
   } finally {
     controller.abort();
     if (context) await context.close().catch(() => {});
+    if (profileLock) await profileLock.release().catch(() => {});
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);
   }
