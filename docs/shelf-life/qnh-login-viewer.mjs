@@ -91,7 +91,7 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
   const title = create('h2', '登录牵牛花', { id: 'qnh-viewer-title' });
   const exit = create('button', '关闭', { type: 'button', 'aria-label': '关闭牵牛花登录' });
   header.append(title, exit);
-  const help = create('p', '在下面的牵牛花页面登录。先点页面中的输入框，再在下方输入并发送。验证码和滑块请亲自完成。', { id: 'qnh-viewer-help', class: 'qnh-viewer-help' });
+  const help = create('p', '在下面的牵牛花页面登录，登录成功后自动进入保质期管理。先点页面中的输入框，再在下方输入并发送。验证码和滑块请亲自完成。', { id: 'qnh-viewer-help', class: 'qnh-viewer-help' });
   const screen = create('div', '', { class: 'qnh-viewer-screen', 'data-zoom': 'false' });
   const image = create('img', '', { alt: '牵牛花官方登录页面，点击或拖动进行操作', draggable: 'false', tabindex: '0' });
   screen.append(image);
@@ -102,15 +102,14 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
   const enter = create('button', '回车', { type: 'button' });
   const up = create('button', '↑ 滚动', { type: 'button', 'aria-label': '向上滚动牵牛花页面' });
   const down = create('button', '↓ 滚动', { type: 'button', 'aria-label': '向下滚动牵牛花页面' });
-  const verify = create('button', '我已登录', { type: 'button', class: 'qnh-viewer-primary' });
-  toolbar.append(zoom, previous, remove, enter, up, down, verify);
+  toolbar.append(zoom, previous, remove, enter, up, down);
   const form = create('form', '', { autocomplete: 'off' });
   const text = create('input', '', { type: 'password', placeholder: '输入账号、密码或验证码', 'aria-label': '发送到已选中的牵牛花输入框', autocomplete: 'off', autocorrect: 'off', autocapitalize: 'off', spellcheck: 'false', maxlength: LIMITS.textLength });
   const send = create('button', '发送输入', { type: 'submit', class: 'qnh-viewer-primary' });
   form.append(text, send);
   const status = create('p', '正在打开牵牛花登录…', { class: 'qnh-viewer-status', role: 'status', 'aria-live': 'polite' });
   dialog.append(style, header, help, screen, toolbar, form, status);
-  const controls = [previous, remove, enter, up, down, verify, text, send];
+  const controls = [previous, remove, enter, up, down, text, send];
   let closed = false, halted = false, cancellationSent = false, started = false, busy = true, authorized = false, currentFrame = null, timer = null, expiryTimer = null;
   let deadline = now() + LIMITS.loginMs, lastVerify = now(), inputCount = 0, activePointer = null, gesture = [];
   const requests = new Set(), listeners = [];
@@ -255,7 +254,7 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
     if (oldFrame) urlAPI.revokeObjectURL(oldFrame);
   }
   async function check() {
-    status.textContent = '正在确认牵牛花登录及本店商品访问权限…';
+    status.textContent = '正在确认牵牛花登录状态与所属商家…';
     activePointer = null; gesture = [];
     lastVerify = now();
     if (applyStatus(await json('/api/qnh/login/verify'))) return;
@@ -302,7 +301,6 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
   listen(enter, 'click', () => input({ type: 'key', key: 'Enter' }));
   listen(up, 'click', () => input({ type: 'scroll', x: 640, y: 450, deltaY: -450 }));
   listen(down, 'click', () => input({ type: 'scroll', x: 640, y: 450, deltaY: 450 }));
-  listen(verify, 'click', () => run(check));
   listen(form, 'submit', event => {
     event.preventDefault();
     if (busy || !started || closed || document.hidden) return;

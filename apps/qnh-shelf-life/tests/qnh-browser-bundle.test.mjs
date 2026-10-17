@@ -22,26 +22,32 @@ async function bundledFactory(keepNames) {
   return module.exports.createCloudflareQnhBrowserFactory;
 }
 
-function remoteProductPage() {
+function remoteLoggedInPage() {
   const visible = extras => ({ nodeType: 1, parentElement: null, innerText: '',
     getClientRects: () => [{}], closest: () => null, ...extras });
-  const input = visible();
-  const field = visible({ innerText: 'SKU', querySelectorAll: () => [input] });
-  const query = visible({ innerText: '查询' });
-  const table = visible({ querySelectorAll: () => [visible({ innerText: '商品信息' }), visible({ innerText: '规格信息' })] });
   const tenant = visible({ innerText: '（租户ID: 1012619）' });
+  const topBar = visible({ contains: element => element === tenant });
+  const main = visible();
+  const layout = visible({ contains: element => [topBar, main, tenant].includes(element) });
+  topBar.parentElement = layout; main.parentElement = layout; tenant.parentElement = topBar;
+  const password = visible(), page = { passwordVisible: false, selectors: [], tenant };
   return vm.createContext({
-    URL, location: new URL('https://qnh.meituan.com/home.html#/unifiedGoods/tenant/spu-list'),
+    URL, location: new URL('https://qnh.meituan.com/'), testPage: page,
     getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
-    document: { querySelectorAll(selector) {
-      return ({ '.unifiedGoods-ant-form-item-row': [field], button: [query], table: [table],
-        'span[class^="SearchLeftTenantId--"]': [tenant] })[selector] || [];
+    document: { readyState: 'complete', querySelectorAll(selector) {
+      page.selectors.push(selector);
+      if (selector === 'span[class^="SearchLeftTenantId--"]') return [tenant];
+      if (selector === '.top-nav-base') return [topBar];
+      if (selector === '.saas-platform-layout-wrapper') return [layout];
+      if (selector === '.saas-platform-layout-main') return [main];
+      if (selector === 'input[type="password"]') return page.passwordVisible ? [password] : [];
+      throw new Error('Login must not inspect product fields, tables or SKU data');
     } },
   });
 }
 
 function privateBinding(remote) {
-  const listeners = new Map(), expressions = [], exceptions = [], diagnostics = [];
+  const listeners = new Map(), commands = [], expressions = [], exceptions = [], diagnostics = [];
   let closed = false;
   const emit = (name, event) => { for (const listener of listeners.get(name) || []) listener(event); };
   const socket = {
@@ -50,6 +56,7 @@ function privateBinding(remote) {
     close() { if (!closed) { closed = true; emit('close', {}); } },
     send(serialized) {
       const command = JSON.parse(serialized);
+      commands.push(command);
       (async () => {
         let result = {};
         if (command.method === 'Page.navigate') remote.location = new URL(command.params.url);
@@ -68,7 +75,7 @@ function privateBinding(remote) {
     },
   };
   return {
-    expressions, exceptions, diagnostics,
+    commands, expressions, exceptions, diagnostics,
     binding: {
       acquire: async () => ({ sessionId: 'synthetic-private-session' }),
       devtools: { newTarget: async () => ({ id: 'synthetic-private-target' }) },
@@ -81,10 +88,10 @@ function privateBinding(remote) {
 
 async function startBundledBrowser(keepNames) {
   const create = await bundledFactory(keepNames);
-  const remote = remoteProductPage(), harness = privateBinding(remote);
+  const remote = remoteLoggedInPage(), harness = privateBinding(remote);
   assert.equal(vm.runInContext('typeof __name', remote), 'undefined');
-  const browser = await create(harness.binding, { expectedTenantId: '1012619',
-    allowedDomains: ['qnh.meituan.com'], confirmProductAccess: async () => true,
+  const browser = await create(harness.binding, { perTenant: true,
+    allowedDomains: ['qnh.meituan.com'],
     diagnostic: harness.diagnostic })();
   return { browser, remote, ...harness };
 }
@@ -108,11 +115,30 @@ test('the configured production bundle runs its real serialized login readers in
     assert.equal(await app.browser.verifyAccess(), true);
     assert.equal(app.browser.tenantId(), '1012619');
     assert.equal(app.exceptions.length, 0);
-    assert.equal(app.expressions.length, 2, 'access and tenant proof are read before and after the fresh-access hook');
+    assert.equal(app.expressions.length, 2, 'logged-in shell and trusted tenant are confirmed twice');
     for (const expression of app.expressions) {
       assert.doesNotMatch(expression, /__name\(/u);
       assert.equal(vm.runInContext(expression, app.remote).tenantId, '1012619');
     }
     assert.equal(vm.runInContext('typeof __name', app.remote), 'undefined', 'fix must not inject build helpers into the external login page');
+    assert.deepEqual(app.commands.filter(command => command.method === 'Page.navigate').map(command => command.params.url), ['https://qnh.meituan.com/']);
+    assert.equal(app.commands.some(command => ['Network.getResponseBody', 'Page.getFrameTree'].includes(command.method)), false);
+    assert.equal(app.remote.testPage.selectors.some(selector => /SKU|table|unifiedGoods/u.test(selector)), false, 'login admission must not require a product lookup');
+  } finally { await app.browser.close(); }
+});
+
+test('the configured bundle rejects a visible login form and cannot switch its bound tenant', async () => {
+  const app = await startBundledBrowser(configuredKeepNames === 'true');
+  try {
+    app.remote.testPage.passwordVisible = true;
+    assert.equal(await app.browser.verifyAccess(), false);
+    assert.equal(app.browser.tenantId(), null);
+    app.remote.testPage.passwordVisible = false;
+    assert.equal(await app.browser.verifyAccess(), true);
+    assert.equal(app.browser.tenantId(), '1012619');
+    app.remote.testPage.tenant.innerText = '（租户ID: 2026220）';
+    assert.equal(await app.browser.verifyAccess(), false);
+    assert.equal(app.browser.tenantId(), '1012619', 'a different tenant must never inherit the existing browser authorization');
+    assert.equal(app.exceptions.length, 0);
   } finally { await app.browser.close(); }
 });

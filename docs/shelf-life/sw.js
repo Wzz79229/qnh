@@ -1,6 +1,6 @@
 /* Cache only the published application shell. Business data and credentials never enter this cache. */
 const CACHE_PREFIX = 'xianqi-shell-';
-const CACHE_NAME = `${CACHE_PREFIX}v14-qnh-login-status`;
+const CACHE_NAME = `${CACHE_PREFIX}v15-qnh-auto-login`;
 const SHELL = [
   './', './index.html', './styles.css', './app.mjs', './core.mjs', './github.mjs',
   './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png',

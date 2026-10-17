@@ -4,7 +4,7 @@ import { webcrypto } from 'node:crypto';
 import {
   QNH_BROWSER_LIMITS, QNH_PHONE_COOKIE, QnhBrowserError,
   createQnhPhoneCookie, readQnhPhoneCookie, clearQnhPhoneCookie, requireQnhBrowserOrigin,
-  normalizeQnhViewerInput, ManagedQnhPhoneSession, createCloudflareQnhBrowserFactory, readObservedQnhTenantId,
+  normalizeQnhViewerInput, ManagedQnhPhoneSession, createCloudflareQnhBrowserFactory, readObservedQnhTenantId, readLoggedInQnhShell,
 } from '../backend/qnh-browser-session.mjs';
 
 const BASE = 'https://fresh-period.example.workers.dev';
@@ -227,7 +227,7 @@ test('non-product provider messages are fixed; exact SKU product is sanitized ag
   assert.equal(h.calls.closes, 1); assert.equal(h.calls.releases, 1);
 });
 
-function bindingHarness({ result, exception = false } = {}) {
+function bindingHarness({ result, exception = false, commandResult } = {}) {
   const commands = []; const acquired = []; const closed = []; const connections = [];
   const socket = new EventTarget();
   socket.accept = () => {};
@@ -235,7 +235,8 @@ function bindingHarness({ result, exception = false } = {}) {
   socket.send = value => {
     const command = JSON.parse(value); commands.push(command);
     const body = exception ? { error: { message: 'provider private URL jwt=secret' } }
-      : { result: command.method === 'Runtime.evaluate' ? { result: { value: result ?? { access: true, tenantId: '1012619' } } }
+      : commandResult ? { result: commandResult(command) }
+        : { result: command.method === 'Runtime.evaluate' ? { result: { value: result ?? { origin: 'https://qnh.meituan.com', shell: true, tenantId: '1012619' } } }
         : command.method === 'Page.captureScreenshot' ? { data: Buffer.from(JPEG).toString('base64') } : {} };
     queueMicrotask(() => socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ id: command.id, ...body }) })));
   };
@@ -254,23 +255,23 @@ function bindingHarness({ result, exception = false } = {}) {
 const FACTORY_OPTIONS = { expectedTenantId: '1012619', allowedDomains: ['qnh.meituan.com', '*.meituan.net'],
   async confirmProductAccess() { return true; } };
 
-test('native factory refuses missing tenant, unknown relay domains, or absent fresh product verifier before allocation', () => {
+test('native factory refuses a missing fixed tenant or unknown relay domains before allocation', () => {
   const h = bindingHarness();
   for (const options of [{ ...FACTORY_OPTIONS, expectedTenantId: undefined }, { ...FACTORY_OPTIONS, expectedTenantId: 1012619 },
-    { ...FACTORY_OPTIONS, confirmProductAccess: undefined }, { ...FACTORY_OPTIONS, allowedDomains: ['qnh.meituan.com', '*.com'] },
+    { ...FACTORY_OPTIONS, allowedDomains: ['qnh.meituan.com', '*.com'] },
     { ...FACTORY_OPTIONS, allowedDomains: ['evil.example'] }]) {
     assert.throws(() => createCloudflareQnhBrowserFactory(h.binding, options), code('QNH_BROWSER_NOT_CONFIGURED'));
   }
   assert.equal(h.acquired.length, 0);
 });
 
-test('native adapter keeps CDP/target capabilities private, recording disabled, fixed product route and strict controls', async () => {
+test('native adapter keeps CDP/target capabilities private, recording disabled, fixed login route and strict controls', async () => {
   const h = bindingHarness();
   const adapter = await createCloudflareQnhBrowserFactory(h.binding, FACTORY_OPTIONS)();
   assert.deepEqual(h.acquired, [{ keepAlive: 60_000, recording: false, guardrails: { allowedDomains: ['qnh.meituan.com', '*.meituan.net'] } }]);
   assert.deepEqual(h.connections, [{ id: 'private-browser-id', options: { targetId: 'private-target-id' } }]);
   assert.deepEqual(Object.keys(adapter), ['tenantId', 'frame', 'input', 'verifyAccess', 'lookup', 'close']);
-  assert.equal(h.commands.find(value => value.method === 'Page.navigate').params.url, 'https://qnh.meituan.com/#/unifiedGoods/tenant/spu-list');
+  assert.equal(h.commands.find(value => value.method === 'Page.navigate').params.url, 'https://qnh.meituan.com/');
   assert.deepEqual(await adapter.frame(), JPEG);
   await adapter.input({ type: 'key', key: 'Enter' });
   assert.deepEqual(h.commands.filter(value => value.method === 'Input.dispatchKeyEvent').map(value => value.params.modifiers), [0, 0]);
@@ -281,15 +282,58 @@ test('native adapter keeps CDP/target capabilities private, recording disabled, 
   assert.deepEqual(h.closed, ['private-browser-id']);
 });
 
-test('tenant mismatch, controls absent, or failed fresh proof cannot authorize native session', async () => {
-  for (const result of [{ access: true, tenantId: '9999999' }, { access: false, tenantId: '1012619' }, { access: true, tenantId: 1012619 }]) {
+test('tenant mismatch, absent login shell, foreign origin or invalid tenant cannot authorize native session', async () => {
+  for (const result of [{ origin: 'https://qnh.meituan.com', shell: true, tenantId: '9999999' },
+    { origin: 'https://qnh.meituan.com', shell: false, tenantId: '1012619' },
+    { origin: 'https://evil.example', shell: true, tenantId: '1012619' },
+    { origin: 'https://qnh.meituan.com', shell: true, tenantId: 1012619 }]) {
     const h = bindingHarness({ result });
     const adapter = await createCloudflareQnhBrowserFactory(h.binding, FACTORY_OPTIONS)();
     assert.equal(await adapter.verifyAccess(), false); await adapter.close();
   }
+});
+
+test('login uses only the official shell and tenant, without any SKU probe, product query or approval hook', async () => {
   const h = bindingHarness();
-  const adapter = await createCloudflareQnhBrowserFactory(h.binding, { ...FACTORY_OPTIONS, async confirmProductAccess() { return false; } })();
-  assert.equal(await adapter.verifyAccess(), false); await adapter.close();
+  const adapter = await createCloudflareQnhBrowserFactory(h.binding, { expectedTenantId: undefined, perTenant: true,
+    allowedDomains: ['qnh.meituan.com'], probeSku: '000123', async confirmProductAccess() { throw new Error('login must not run a product approval hook'); } })();
+  assert.equal(await adapter.verifyAccess(), true);
+  assert.equal(adapter.tenantId(), '1012619');
+  const evaluated = h.commands.filter(value => value.method === 'Runtime.evaluate');
+  assert.equal(evaluated.length, 2);
+  assert.ok(evaluated.every(value => value.params.expression.includes('readLoggedInQnhShell')));
+  assert.ok(evaluated.every(value => !value.params.expression.includes('readVisibleProductRows') && !value.params.expression.includes('searchVisibleSku')));
+  assert.ok(!h.commands.some(value => ['Page.getFrameTree', 'Network.getResponseBody'].includes(value.method)));
+  assert.deepEqual(h.commands.filter(value => value.method === 'Page.navigate').map(value => value.params.url), ['https://qnh.meituan.com/']);
+  await adapter.close();
+});
+
+test('only an employee SKU lookup navigates to the product page and starts a fresh exact-SKU search', async () => {
+  let currentUrl;
+  const h = bindingHarness({ commandResult(command) {
+    if (command.method === 'Page.navigate') currentUrl = command.params.url;
+    if (command.method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'synthetic-official-main-frame' } } };
+    if (command.method !== 'Runtime.evaluate') return {};
+    const expression = command.params.expression;
+    if (expression.includes('readLoggedInQnhShell')) return { result: { value: { origin: 'https://qnh.meituan.com', shell: true, tenantId: '1012619' } } };
+    if (expression.includes('readProductAccess')) return { result: { value: { origin: 'https://qnh.meituan.com',
+      access: currentUrl === 'https://qnh.meituan.com/#/unifiedGoods/tenant/spu-list', tenantId: '1012619' } } };
+    if (expression.includes('searchVisibleSku')) return { result: { value: false } }; // No synthetic receipt: an incomplete query must fail closed.
+    throw new Error('unexpected remote evaluation');
+  } });
+  const adapter = await createCloudflareQnhBrowserFactory(h.binding, { perTenant: true, allowedDomains: ['qnh.meituan.com'] })();
+  assert.equal(await adapter.verifyAccess(), true);
+  assert.equal(currentUrl, 'https://qnh.meituan.com/');
+  assert.equal(h.commands.some(command => command.method === 'Page.getFrameTree'), false);
+  const answer = await adapter.lookup(SKU);
+  assert.equal(answer.status, 'error');
+  assert.deepEqual(h.commands.filter(command => command.method === 'Page.navigate').map(command => command.params.url), [
+    'https://qnh.meituan.com/', 'https://qnh.meituan.com/#/unifiedGoods/tenant/spu-list',
+  ]);
+  assert.equal(h.commands.some(command => command.method === 'Page.getFrameTree'), true);
+  assert.equal(h.commands.some(command => command.method === 'Runtime.evaluate'
+    && command.params.expression.includes('searchVisibleSku') && command.params.expression.includes(SKU)), true);
+  await adapter.close();
 });
 
 test('native provider error closes allocated session and never reflects CDP error text', async () => {
@@ -300,7 +344,7 @@ test('native provider error closes allocated session and never reflects CDP erro
 });
 
 test('per-tenant native login binds the actual verified tenant and refuses later tenant switching', async () => {
-  const result = { access: true, tenantId: '7654321' };
+  const result = { origin: 'https://qnh.meituan.com', shell: true, tenantId: '7654321' };
   const h = bindingHarness({ result });
   const adapter = await createCloudflareQnhBrowserFactory(h.binding, { ...FACTORY_OPTIONS, expectedTenantId: undefined, perTenant: true })();
   assert.equal(adapter.tenantId(), null);
@@ -329,5 +373,47 @@ test('observed tenant reader requires a unique visible non-editable exact header
   } finally {
     if (oldDocument === undefined) delete globalThis.document; else globalThis.document = oldDocument;
     if (oldStyle === undefined) delete globalThis.getComputedStyle; else globalThis.getComputedStyle = oldStyle;
+  }
+});
+
+test('login shell requires the real visible official layout and top-bar tenant ancestry, never an arbitrary HTTP page', () => {
+  const prior = { document: globalThis.document, location: globalThis.location, style: globalThis.getComputedStyle };
+  const element = (parentElement = null, innerText = '') => ({ parentElement, innerText, nodeType: 1, hidden: false, editable: false,
+    getClientRects() { return this.hidden ? [] : [{}]; },
+    closest() { return this.editable ? {} : null; },
+    contains(other) { for (let current = other; current; current = current.parentElement) if (current === this) return true; return false; },
+  });
+  const layout = element(), top = element(layout), main = element(layout), tenant = element(top, '（租户ID:1012619）'), password = element(main);
+  const nodes = { '.saas-platform-layout-wrapper': [layout], '.top-nav-base': [top], '.saas-platform-layout-main': [main],
+    'span[class^="SearchLeftTenantId--"]': [tenant], 'input[type="password"]': [] };
+  globalThis.document = { readyState: 'complete', querySelectorAll: selector => nodes[selector] || [] };
+  globalThis.location = { href: 'https://qnh.meituan.com/#/home' };
+  globalThis.getComputedStyle = node => ({ display: node.hidden ? 'none' : 'block', visibility: 'visible', opacity: '1' });
+  try {
+    assert.equal(readLoggedInQnhShell(), true);
+    assert.equal(readObservedQnhTenantId(), '1012619');
+    for (const href of ['https://evil.example/', 'http://qnh.meituan.com/', 'https://qnh.meituan.com/error.html', 'https://qnh.meituan.com/#/login']) {
+      globalThis.location.href = href;
+      assert.equal(readLoggedInQnhShell(), false);
+    }
+    globalThis.location.href = 'https://qnh.meituan.com/home.html#/home';
+    assert.equal(readLoggedInQnhShell(), true);
+    document.readyState = 'loading'; assert.equal(readLoggedInQnhShell(), false); document.readyState = 'complete';
+    for (const selector of ['.saas-platform-layout-wrapper', '.top-nav-base', '.saas-platform-layout-main', 'span[class^="SearchLeftTenantId--"]']) {
+      const original = nodes[selector];
+      nodes[selector] = []; assert.equal(readLoggedInQnhShell(), false);
+      nodes[selector] = [...original, ...original]; assert.equal(readLoggedInQnhShell(), false);
+      nodes[selector] = original;
+    }
+    tenant.parentElement = main; assert.equal(readLoggedInQnhShell(), false); tenant.parentElement = top;
+    tenant.editable = true; assert.equal(readLoggedInQnhShell(), false); tenant.editable = false;
+    tenant.innerText = 'arbitrary 1012619'; assert.equal(readLoggedInQnhShell(), false); tenant.innerText = '（租户ID:1012619）';
+    layout.hidden = true; assert.equal(readLoggedInQnhShell(), false); layout.hidden = false;
+    nodes['input[type="password"]'] = [password]; assert.equal(readLoggedInQnhShell(), false);
+    password.hidden = true; assert.equal(readLoggedInQnhShell(), true);
+  } finally {
+    if (prior.document === undefined) delete globalThis.document; else globalThis.document = prior.document;
+    if (prior.location === undefined) delete globalThis.location; else globalThis.location = prior.location;
+    if (prior.style === undefined) delete globalThis.getComputedStyle; else globalThis.getComputedStyle = prior.style;
   }
 });

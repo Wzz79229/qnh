@@ -68,6 +68,8 @@ test('login is rendered inside the app and only fixed same-origin transport is u
   assert.equal(app.tag('dialog').id, 'qnh-login-viewer');
   assert.equal(app.tag('dialog').open, true);
   assert.equal(app.nodes.some(node => ['iframe', 'a'].includes(node.tagName)), false);
+  assert.equal(app.button('我已登录'), undefined, 'login detection needs no manual confirmation button');
+  assert.match(app.nodes.find(node => node.id === 'qnh-viewer-help').textContent, /登录成功后自动进入保质期管理/);
   assert.deepEqual(app.calls.map(call => call.path), ['/api/qnh/login/start', '/api/qnh/login/frame']);
   for (const { path, init } of app.calls) {
     assert.match(path, /^\/api\/qnh\/login\/(?:start|frame)$/u);
@@ -166,7 +168,7 @@ test('phone visibility pauses all refresh and verification and clears unfinished
   app.handle.close();
 });
 
-test('verified server readiness alone triggers entry and destroys viewer without canceling authorized session', async () => {
+test('automatic checks enter on verified readiness without a manual confirmation and preserve the authorized session', async () => {
   let ready = false;
   const app = harness({ fetch(path, init, status) { if (path.endsWith('/verify')) return response(status(ready ? { authorized: true, status: 'ready' } : {})); } });
   await settle(); await app.advance(5000);
@@ -184,7 +186,7 @@ test('verified server readiness alone triggers entry and destroys viewer without
 test('invalid or merely claimed authorized status never admits the user', async () => {
   for (const extra of [{ authorized: 'true', status: 'ready' }, { authorized: true, status: 'login' }, { authorized: true, status: 'ready', loginMethod: 'external' }]) {
     const app = harness({ fetch(path, init, status) { if (path.endsWith('/verify')) return response(status(extra)); } });
-    await settle(); app.button('我已登录').emit('click'); await settle();
+    await settle(); await app.advance(5000);
     assert.equal(app.authorized.length, 0); assert.equal(app.handle.closed, false);
     assert.match(app.status(), /连接暂时中断/);
     app.handle.close();
@@ -196,7 +198,7 @@ test('a late authorized body cannot revive a viewer that the user already closed
   const app = harness({ fetch(path, init, status) {
     if (path.endsWith('/verify')) return { ok: true, text: () => new Promise(resolve => { finishBody = () => resolve(JSON.stringify(status({ authorized: true, status: 'ready' }))); }) };
   } });
-  await settle(); app.button('我已登录').emit('click'); await settle();
+  await settle(); await app.advance(5000);
   app.handle.close(); finishBody(); await settle();
   assert.equal(app.authorized.length, 0); assert.equal(app.handle.authorized, false);
   assert.equal(app.requestCount('/api/qnh/login/cancel'), 1); assert.equal(app.timers.size, 0);
@@ -285,7 +287,7 @@ test('an initial 401 or 410 remains visible instead of deleting the login dialog
     await settle();
     assert.equal(app.handle.closed, false); assert.equal(app.tag('dialog').removed, false); assert.equal(app.tag('dialog').open, true);
     assert.match(app.status(), /登录会话已结束/); assert.doesNotMatch(app.status(), /synthetic-secret/);
-    assert.equal(app.tag('input').disabled, true); assert.equal(app.button('我已登录').disabled, true);
+    assert.equal(app.tag('input').disabled, true); assert.equal(app.button('发送输入').disabled, true);
     assert.equal(app.requestCount('/api/qnh/login/cancel'), 1); assert.equal(app.closed.length, 0); assert.equal(app.timers.size, 0);
     await app.advance(60_000); assert.equal(app.requestCount('/api/qnh/login/frame'), 0);
     app.button('关闭').emit('click'); assert.equal(app.closed.length, 1); assert.equal(app.handle.closed, true);

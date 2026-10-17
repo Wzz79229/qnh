@@ -8,6 +8,7 @@ export const QNH_BROWSER_LIMITS = Object.freeze({
   inputs: 600, textLength: 128, dragPoints: 32, frameBytes: 2_000_000,
 });
 export const QNH_PHONE_COOKIE = '__Host-qnh-phone';
+const QNH_LOGIN_URL = 'https://qnh.meituan.com/';
 const PHONE_TOKEN = /^[a-f0-9]{64}$/u;
 const TENANT_ID = /^[1-9][0-9]{0,19}$/u;
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -314,6 +315,35 @@ function readProductAccess() {
   return fields.length === 1 && queries.length === 1 && headers.includes('商品信息') && headers.includes('规格信息');
 }
 
+/** The official SPA's logged-in shell, not an HTTP status, client assertion, or product-query permission. */
+export function readLoggedInQnhShell() {
+  const url = new URL(location.href);
+  if (url.origin !== 'https://qnh.meituan.com' || !['/', '/home.html'].includes(url.pathname)
+    || /^#\/(?:login|logout)(?:\/|\?|$)/iu.test(url.hash)
+    || !['interactive', 'complete'].includes(document.readyState)) return false;
+  const visible = element => {
+    if (!element?.getClientRects().length) return false;
+    let current = element;
+    while (current?.nodeType === 1) {
+      const style = getComputedStyle(current);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+      current = current.parentElement;
+    }
+    return true;
+  };
+  // These layout selectors and ancestry were observed on the real authenticated QNH page.
+  // The tenant is also checked independently in the same browser task by readTenantId.
+  const layouts = Array.from(document.querySelectorAll('.saas-platform-layout-wrapper')).filter(visible);
+  const topBars = Array.from(document.querySelectorAll('.top-nav-base')).filter(visible);
+  const mains = Array.from(document.querySelectorAll('.saas-platform-layout-main')).filter(visible);
+  const headers = Array.from(document.querySelectorAll('span[class^="SearchLeftTenantId--"]'))
+    .filter(element => visible(element) && !element.closest('[contenteditable],input,textarea'));
+  return layouts.length === 1 && topBars.length === 1 && mains.length === 1 && headers.length === 1
+    && layouts[0].contains(topBars[0]) && layouts[0].contains(mains[0]) && topBars[0].contains(headers[0])
+    && /^（租户ID:\s*[1-9][0-9]{0,19}）$/u.test(headers[0].innerText.trim())
+    && !Array.from(document.querySelectorAll('input[type="password"]')).some(visible);
+}
+
 /** Observed on the real QNH product header, not inferred from a phone-supplied tenant or arbitrary body text. */
 export function readObservedQnhTenantId() {
   const nodes = Array.from(document.querySelectorAll('span[class^="SearchLeftTenantId--"]')).filter(element => {
@@ -381,19 +411,17 @@ function validateDomains(input) {
  * Cloudflare typed binding, no API token and no Live View capability. NOT enabled by default.
  * readTenantId is a self-contained, audited DOM reader of an observed, non-editable official tenant identity.
  * Never implement it from an input field, URL supplied by the phone, client JSON, or an assumed default merchant.
- * confirmProductAccess must independently confirm a fresh authenticated product read in this same page.
- * Header/controls alone are insufficient: the default proof requires a fresh,
- * uncached product JSON response matching the server-controlled probe SKU and visible name.
- * The factory fails before allocating without an expected tenant, policy and probe/hook.
+ * Login verifies the observed official logged-in shell and tenant only; it never selects a SKU or queries product JSON.
+ * SKU scanning separately navigates to the fixed product route and requires fresh response/visible-row integrity.
+ * expectedTenantId remains an optional fixed-tenant compatibility mode; perTenant binds the real observed login tenant.
  */
 export function createCloudflareQnhBrowserFactory(binding, { expectedTenantId, readTenantId = readObservedQnhTenantId,
-  confirmProductAccess, allowedDomains, probeSku, perTenant = false, diagnostic = browserDiagnostic } = {}) {
+  allowedDomains, perTenant = false, diagnostic = browserDiagnostic } = {}) {
   const tenantId = perTenant === true ? null : validTenantId(expectedTenantId);
   const domains = validateDomains(allowedDomains);
   if (typeof binding?.acquire !== 'function' || typeof binding?.connectSession !== 'function'
     || typeof binding?.closeSession !== 'function' || typeof binding?.devtools?.newTarget !== 'function'
-    || typeof readTenantId !== 'function' || typeof confirmProductAccess !== 'function' && !probeSku && perTenant !== true) throw notConfigured();
-  const proofSku = probeSku ? normalizeSku(probeSku) : null;
+    || typeof readTenantId !== 'function') throw notConfigured();
   return async () => {
     let browserSessionId; let cdp; let phase = 'ACQUIRE';
     try {
@@ -428,8 +456,8 @@ export function createCloudflareQnhBrowserFactory(binding, { expectedTenantId, r
         if (typeof fn !== 'function') throw notConfigured();
         return evaluateExpression(`(${fn.toString()})(${JSON.stringify(argument) ?? ''})`);
       };
-      await cdp.send('Page.navigate', { url: QNH_PRODUCT_URL });
-      let ended = false, verifiedUntil = 0, boundTenantId = null;
+      await cdp.send('Page.navigate', { url: QNH_LOGIN_URL });
+      let ended = false, boundTenantId = null;
       const approvedTenant = value => typeof value === 'string' && TENANT_ID.test(value)
         && (!tenantId || tenantId === value) && (!boundTenantId || boundTenantId === value);
       const productsInPage = async () => {
@@ -458,32 +486,27 @@ export function createCloudflareQnhBrowserFactory(binding, { expectedTenantId, r
       };
       const verifyAccess = async () => {
         if (ended) return false;
-        // Read route, controls and tenant atomically in one page event-loop task.
-        const readProof = () => evaluateExpression(`({origin:location.origin,access:(${readProductAccess.toString()})(),tenantId:(${readTenantId.toString()})()})`);
-        let before = await readProof();
-        if (!approvedTenant(before.tenantId)) return false;
-        if (before.access !== true) {
-          const origin = await evaluate(() => location.origin);
-          if (origin !== 'https://qnh.meituan.com') return false;
-          await cdp.send('Page.navigate', { url: QNH_PRODUCT_URL });
-          for (let attempt = 0; attempt < 12; attempt++) {
-            before = await readProof();
-            if (before.access === true) break;
-            await new Promise(resolve => setTimeout(resolve, 250));
-          }
-        }
-        if (before?.access !== true || !approvedTenant(before.tenantId)) return false;
-        if (Date.now() < verifiedUntil) return true;
-        const candidates = !proofSku && perTenant === true ? await productsInPage() : null;
-        const selectedSku = proofSku || candidates?.[0]?.sku;
-        const accessible = typeof confirmProductAccess === 'function'
-          ? await confirmProductAccess({ evaluate, expectedTenantId: before.tenantId })
-          : typeof selectedSku === 'string' && (await freshLookup(selectedSku)).status === 'found';
-        if (accessible !== true) return false;
+        // Official origin, visible logged-in shell and tenant are read atomically in each page task.
+        const readProof = () => evaluateExpression(`({origin:location.origin,shell:(${readLoggedInQnhShell.toString()})(),tenantId:(${readTenantId.toString()})()})`);
+        const before = await readProof();
+        if (before?.origin !== 'https://qnh.meituan.com' || before.shell !== true || !approvedTenant(before.tenantId)) return false;
         const after = await readProof();
-        const valid = after?.access === true && after.tenantId === before.tenantId && approvedTenant(after.tenantId);
-        if (valid) { boundTenantId = after.tenantId; verifiedUntil = Date.now() + 15_000; }
+        const valid = after?.origin === 'https://qnh.meituan.com' && after.shell === true
+          && after.tenantId === before.tenantId && approvedTenant(after.tenantId);
+        if (valid) boundTenantId = after.tenantId;
         return valid;
+      };
+      const readProductProof = () => evaluateExpression(`({origin:location.origin,access:(${readProductAccess.toString()})(),tenantId:(${readTenantId.toString()})()})`);
+      const productReady = proof => proof?.origin === 'https://qnh.meituan.com' && proof.access === true
+        && Boolean(boundTenantId) && proof.tenantId === boundTenantId;
+      const enterProductPage = async () => {
+        if (productReady(await readProductProof())) return true;
+        await cdp.send('Page.navigate', { url: QNH_PRODUCT_URL });
+        for (let attempt = 0; attempt < 12; attempt++) {
+          if (productReady(await readProductProof())) return true;
+          await new Promise(resolve => setTimeout(resolve, 250));
+        }
+        return false;
       };
       return {
         tenantId() { return boundTenantId; },
@@ -517,9 +540,9 @@ export function createCloudflareQnhBrowserFactory(binding, { expectedTenantId, r
         async lookup(value) {
           const sku = normalizeSku(value);
           if (!await verifyAccess()) return { status: 'login_required' };
+          if (!await enterProductPage()) return { status: 'error' };
           const result = await freshLookup(sku);
-          const proof = await evaluateExpression(`({access:(${readProductAccess.toString()})(),tenantId:(${readTenantId.toString()})()})`);
-          if (proof.access !== true || !boundTenantId || proof.tenantId !== boundTenantId) return { status: 'login_required' };
+          if (!productReady(await readProductProof())) return { status: 'login_required' };
           return result;
         },
         async close() {
