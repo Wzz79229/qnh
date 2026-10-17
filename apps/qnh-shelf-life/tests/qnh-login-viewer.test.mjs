@@ -249,7 +249,7 @@ test('upstream errors and configuration details never appear in the viewer', asy
 
 test('safe server codes explain configuration, origin, quota and rate failures without reflecting provider messages', async () => {
   const cases = [
-    ['QNH_BROWSER_DEMO_LIMIT', 429, /今日手机登录试用额度已用完/],
+    ['QNH_BROWSER_DEMO_LIMIT', 429, /今日登录测试次数已用完/],
     ['QNH_BROWSER_START_RATE', 429, /等待21秒/],
     ['QNH_BROWSER_ORIGIN_DENIED', 403, /来源校验失败/],
     ['QNH_BROWSER_NOT_CONFIGURED', 503, /尚未完成配置/],

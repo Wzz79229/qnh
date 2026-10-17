@@ -4,7 +4,7 @@ const KEYS = new Set(['Backspace', 'Delete', 'Tab', 'Enter', 'Escape', 'ArrowLef
 const INPUT_PATH = '/api/qnh/login/input';
 const controlCharacters = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u;
 const ERROR_MESSAGES = Object.freeze({
-  QNH_BROWSER_DEMO_LIMIT: '今日手机登录试用额度已用完，请联系管理员。',
+  QNH_BROWSER_DEMO_LIMIT: '今日登录测试次数已用完，明天北京时间08:00后可重试。',
   QNH_BROWSER_START_RATE: '登录启动过于频繁，请稍候关闭此窗口后重新登录。',
   QNH_BROWSER_ORIGIN_DENIED: '登录来源校验失败，请从鲜期主地址重新打开程序。',
   QNH_BROWSER_NOT_CONFIGURED: '手机登录服务尚未完成配置，请联系管理员。',
@@ -50,13 +50,14 @@ export function normalizeQnhViewerInput(value) {
 
 const CSS = `
 #qnh-login-viewer{position:fixed;inset:0;z-index:1000;display:flex;flex-direction:column;box-sizing:border-box;width:100%;max-width:none;height:100dvh;max-height:none;margin:0;padding:0;border:0;background:#f6f8f6;color:#172a26;font:14px/1.5 system-ui,sans-serif;overflow:hidden}
-#qnh-login-viewer *{box-sizing:border-box}#qnh-login-viewer::backdrop{background:#13272088}
+#qnh-login-viewer *{box-sizing:border-box}#qnh-login-viewer [hidden]{display:none!important}#qnh-login-viewer::backdrop{background:#13272088}
 #qnh-login-viewer header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid #dce5df;background:white}
 #qnh-login-viewer h2{margin:0;font-size:19px}#qnh-login-viewer p{margin:0}#qnh-login-viewer .qnh-viewer-help{padding:9px 16px;font-size:12px;color:#52665d}
 #qnh-login-viewer button{min-height:40px;border:1px solid #c8d9ce;border-radius:9px;padding:7px 12px;background:#fff;color:#203e30;font:inherit;cursor:pointer}
 #qnh-login-viewer button:disabled{opacity:.5;cursor:wait}#qnh-login-viewer .qnh-viewer-primary{background:#236446;color:#fff;border-color:#236446}
 #qnh-login-viewer .qnh-viewer-screen{flex:1;min-height:120px;overflow:auto;background:#e8eeea;overscroll-behavior:contain;position:relative}
 #qnh-login-viewer img{display:block;width:100%;height:auto;min-height:1px;touch-action:none;user-select:none;-webkit-user-drag:none;background:#fff}
+#qnh-login-viewer .qnh-viewer-screen[data-error="true"]{display:grid;place-items:center;padding:24px;text-align:center;background:#f6f8f6}#qnh-login-viewer .qnh-viewer-error{max-width:340px;font-size:16px;line-height:1.9;color:#52665d}
 #qnh-login-viewer .qnh-viewer-screen[data-zoom="true"] img{width:1280px;max-width:none}
 #qnh-login-viewer .qnh-viewer-toolbar{display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;background:#fff;border-top:1px solid #dce5df}
 #qnh-login-viewer form{display:flex;gap:8px;align-items:center;padding:0 12px 9px;background:#fff}
@@ -152,6 +153,9 @@ export function openQnhLoginViewer({ onAuthorized = () => {}, onClose = () => {}
     revokeFrame(); setBusy(false); cancelSession();
     // Keep the dialog open: deleting it immediately on an initial 401/410 looked like an unresponsive login button.
     status.textContent = message;
+    image.hidden = true; help.hidden = true; toolbar.hidden = true; form.hidden = true; status.hidden = true;
+    screen.setAttribute('data-error', 'true');
+    screen.append(create('p', message, { class: 'qnh-viewer-error', role: 'alert' }));
   }
   const showExpired = () => haltWithMessage(ERROR_MESSAGES.QNH_BROWSER_SESSION_EXPIRED);
   function applyStatus(value) {
