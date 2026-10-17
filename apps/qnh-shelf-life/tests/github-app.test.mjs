@@ -57,15 +57,35 @@ test('PAT compatibility stays server-only and performs no App network request', 
   assert.equal(await token({ GITHUB_TOKEN: ' synthetic_pat ' }), 'synthetic_pat');
 });
 
-for (const pem of [PEM, PKCS1]) {
-  test(`real RSA signature and restricted installation token with ${pem.includes('RSA PRIVATE') ? 'PKCS1' : 'PKCS8'}`, async () => {
-    const f = fixture();
-    const value = await f.token({ ...APP, GITHUB_APP_PRIVATE_KEY: pem });
-    assert.equal(value, issued(START).token);
-    assert.ok(value.length > 512);
-    assert.equal(f.calls.length, 2);
-  });
+for (const [kind, pem] of [['PKCS8', PEM], ['PKCS1', PKCS1]]) {
+  for (const [format, value] of [['LF', pem], ['CRLF', pem.replace(/\n/g, '\r\n')],
+    ['dashboard single line', pem.replace(/[\r\n]/g, '')], ['ASCII whitespace', pem.replace(/\n/g, ' \t')]]) {
+    test(`real RSA signature and restricted installation token with ${kind} ${format}`, async () => {
+      const f = fixture();
+      const token = await f.token({ ...APP, GITHUB_APP_PRIVATE_KEY: value });
+      assert.equal(token, issued(START).token);
+      assert.ok(token.length > 512);
+      assert.equal(f.calls.length, 2);
+    });
+  }
 }
+
+test('PEM normalization rejects mismatched labels, missing armor and non-base64 content before network access', async () => {
+  for (const value of [PEM.replace('END PRIVATE KEY', 'END RSA PRIVATE KEY'), PKCS1.replace('END RSA PRIVATE KEY', 'END PRIVATE KEY'),
+    PEM.replace(/^-----BEGIN PRIVATE KEY-----\n/, ''), PEM.replace(/\n/g, '\\n'), PEM.replace('\n', '\u00a0'),
+    '-----BEGIN PRIVATE KEY----- \t\r\n-----END PRIVATE KEY-----', 'x'.repeat(32769)]) {
+    const f = fixture();
+    await assert.rejects(f.token({ ...APP, GITHUB_APP_PRIVATE_KEY: value }), error => error.code === 'SETUP_REQUIRED');
+    assert.equal(f.calls.length, 0);
+  }
+});
+
+test('PEM formatting differences preserve the existing installation-token cache', async () => {
+  const f = fixture();
+  await f.token(APP);
+  await f.token({ ...APP, GITHUB_APP_PRIVATE_KEY: PEM.replace(/[\r\n]/g, '') });
+  assert.equal(f.calls.length, 2);
+});
 
 test('concurrent requests share minting; expiry margin refreshes and explicit invalidation works', async () => {
   const f = fixture();

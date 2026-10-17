@@ -3,6 +3,8 @@ main = "worker.mjs"
 compatibility_date = "2026-10-15"
 workers_dev = true
 preview_urls = false
+# Preserve administrator-managed runtime App IDs during GitHub-triggered builds.
+keep_vars = true
 
 [vars]
 ALLOWED_ORIGIN = "https://wzz79229.github.io"

@@ -10,7 +10,7 @@
 
 核对：名称 `qnh-bzq-Wzz79229`；主页为现有 App；Webhook 关闭；Repository permissions 的 **Contents: Read and write** 和 **Metadata: Read-only**；其他权限不授予；安装范围选择 **Only on this account**。名称已被占用时，使用一个可辨认的新名称。
 
-管理员亲自点击 Create GitHub App。注册后记录数字 **App ID**，不是 Client ID。页面的 Generate a private key 会下载 PEM 文件；该文件是凭据，不发聊天，不提交仓库，也不要由助手读取。
+管理员亲自点击 Create GitHub App。注册后记录数字 **App ID**，不是 Client ID。在 Credentials → Key pairs 中亲自点击 New key（旧版为 Generate a private key），按提示下载 PEM 文件；该文件是凭据，不发聊天，不提交仓库，也不要由助手读取。
 
 ## 2. 只安装到 bzq
 
@@ -27,6 +27,10 @@ App 设置中选择 Install App → Wzz79229 → **Only select repositories** �
 | `GITHUB_APP_ID` | Text | App 设置里的数字 App ID |
 | `GITHUB_APP_INSTALLATION_ID` | Text | 上一步安装配置 URL 的数字 ID |
 | `GITHUB_APP_PRIVATE_KEY` | Secret | 本人打开下载的 PEM，将包含 BEGIN/END 的完整多行内容粘贴到 Cloudflare |
+
+Cloudflare 新版添加变量表单中，私钥所在行必须勾选 **Secret**。若单行 Value 输入框在粘贴时移除了换行，后台会规范化 PEM 格式；BEGIN/END 标签和中间的全部内容仍须完整。不要使用浏览器自动填充的密码代替私钥。
+
+Wrangler 已启用 `keep_vars = true`，后续从 GitHub 自动部署时保留管理员在面板配置的 App ID 和安装 ID。私钥始终使用 Secret，不写入仓库。
 
 由管理员完成 Secret 保存和 Deploy。不要把私钥发到聊天或填进 Build Variables。App 模式不需要 `GITHUB_TOKEN`；即使旧变量仍在，只要任一 App 字段存在，后台就要求三项 App 配置完整，不静默回退旧令牌。
 

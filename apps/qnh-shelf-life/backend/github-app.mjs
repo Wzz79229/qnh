@@ -12,14 +12,25 @@ export class GitHubAuthorizationError extends Error {
   }
 }
 
+function parsePemEnvelope(raw) {
+  if (typeof raw !== 'string' || raw.length > 32768) return null;
+  // Single-line dashboard inputs may remove PEM line breaks when pasting.
+  // Keep both armor labels and the base64 alphabet strict; normalize only ASCII whitespace.
+  const match = /^-----BEGIN (PRIVATE KEY|RSA PRIVATE KEY)-----([A-Za-z0-9+/= \t\r\n]+)-----END \1-----[ \t\r\n]*$/.exec(raw);
+  if (!match) return null;
+  const body = match[2].replace(/[ \t\r\n]/g, '');
+  if (!body) return null;
+  return { rsa: match[1] === 'RSA PRIVATE KEY', body, pem: `-----BEGIN ${match[1]}-----\n${body}\n-----END ${match[1]}-----\n` };
+}
+
 function config(env = {}) {
   if (FIELDS.some(field => env[field] !== undefined)) {
+    const key = parsePemEnvelope(env.GITHUB_APP_PRIVATE_KEY);
     if (!FIELDS.slice(0, 2).every(field => typeof env[field] === 'string' && /^[1-9]\d{0,15}$/.test(env[field]))
-      || typeof env.GITHUB_APP_PRIVATE_KEY !== 'string' || env.GITHUB_APP_PRIVATE_KEY.length > 32768
-      || !/^-----BEGIN (RSA )?PRIVATE KEY-----\r?\n[A-Za-z0-9+/=\r\n]+\r?\n-----END (RSA )?PRIVATE KEY-----\s*$/.test(env.GITHUB_APP_PRIVATE_KEY)) {
+      || !key) {
       throw new GitHubAuthorizationError('SETUP_REQUIRED', 503);
     }
-    return { mode: 'app', appId: env.GITHUB_APP_ID, installationId: env.GITHUB_APP_INSTALLATION_ID, pem: env.GITHUB_APP_PRIVATE_KEY };
+    return { mode: 'app', appId: env.GITHUB_APP_ID, installationId: env.GITHUB_APP_INSTALLATION_ID, pem: key.pem };
   }
   if (typeof env.GITHUB_TOKEN !== 'string' || !env.GITHUB_TOKEN.trim() || /[\s\x00-\x1f\x7f]/.test(env.GITHUB_TOKEN.trim())) {
     throw new GitHubAuthorizationError('SETUP_REQUIRED', 503);
@@ -57,10 +68,10 @@ function der(tag, value) {
 
 async function privateKey(pem, cryptoImpl) {
   try {
-    const match = /^-----BEGIN (RSA )?PRIVATE KEY-----\r?\n([A-Za-z0-9+/=\r\n]+)\r?\n-----END (RSA )?PRIVATE KEY-----\s*$/.exec(pem);
-    if (!match || match[1] !== match[3]) throw new Error();
-    let bytes = Uint8Array.from(atob(match[2].replace(/[\r\n]/g, '')), char => char.charCodeAt(0));
-    if (match[1]) {
+    const envelope = parsePemEnvelope(pem);
+    if (!envelope) throw new Error();
+    let bytes = Uint8Array.from(atob(envelope.body), char => char.charCodeAt(0));
+    if (envelope.rsa) {
       // GitHub downloads PKCS#1; WebCrypto imports PKCS#8. Wrap without inspecting RSA integers.
       bytes = der(0x30, concatenate(Uint8Array.of(2, 1, 0), Uint8Array.of(0x30, 0x0d, 6, 9, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 1, 1, 1, 5, 0), der(4, bytes)));
     }
