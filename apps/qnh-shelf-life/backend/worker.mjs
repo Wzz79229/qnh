@@ -214,7 +214,12 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
   }
 
   const repositoryFetch = async (url, options) => {
-    const response = await fetchImpl(url, { ...options, headers: { ...options.headers, 'User-Agent': 'qnh-shelf-life-team-backend' } });
+    // Shared browser stores use browser-only fetch options. Workers have no cookie jar.
+    // Manual mode returns redirects to each store's existing rejection checks.
+    const serverOptions = { ...options, redirect: 'manual' };
+    delete serverOptions.credentials;
+    delete serverOptions.referrerPolicy;
+    const response = await fetchImpl(url, { ...serverOptions, headers: { ...options.headers, 'User-Agent': 'qnh-shelf-life-team-backend' } });
     if (response.status === 401) githubToken.invalidate();
     return response;
   };
@@ -272,7 +277,7 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
             'User-Agent': 'qnh-shelf-life-team-backend',
             'X-GitHub-Api-Version': '2026-03-10', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
           }, body: body === undefined ? undefined : JSON.stringify(body),
-          redirect: 'error', cache: 'no-store', credentials: 'omit', signal: controller.signal,
+          redirect: 'manual', cache: 'no-store', signal: controller.signal,
         });
         if (response.redirected || response.status >= 300 && response.status < 400
           || response.url && new URL(response.url).origin !== 'https://api.github.com') throw new Error();

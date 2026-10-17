@@ -102,9 +102,43 @@ test('valid sessions read the fixed private data and sanitize unknown fields', a
   assert.equal(url, 'https://api.github.com/repos/Wzz79229/bzq/contents/data/shelf-life.json?ref=main');
   assert.equal(options.headers.Authorization, `Bearer ${env.GITHUB_TOKEN}`);
   assert.equal(options.headers['User-Agent'], 'qnh-shelf-life-team-backend');
-  assert.equal(options.redirect, 'error');
+  assert.equal(options.redirect, 'manual');
+  assert.equal(Object.hasOwn(options, 'credentials'), false);
+  assert.equal(Object.hasOwn(options, 'referrerPolicy'), false);
+  assert.equal(options.headers.Cookie, undefined);
   assert.equal(options.cache, 'no-store');
   assert.ok(!url.includes(env.GITHUB_TOKEN));
+});
+
+test('Worker state and direct photo requests work with a runtime that rejects browser-only fetch options', async () => {
+  const runtime = value => async (_url, options) => {
+    if (options.redirect === 'error' || Object.hasOwn(options, 'credentials') || Object.hasOwn(options, 'referrerPolicy')) {
+      throw new TypeError('unsupported Worker fetch option');
+    }
+    assert.equal(options.redirect, 'manual');
+    assert.equal(options.headers.Cookie, undefined);
+    return reply(200, value);
+  };
+  const h = harness(runtime(file(state())), runtime(photoFile()));
+  const cookie = await h.login();
+  assert.equal((await h.request('/api/state', { cookie })).status, 200);
+  assert.equal((await h.request(`/api/photos/${ID}`, { cookie })).status, 200);
+  assert.equal(h.calls.length, 2);
+});
+
+test('Worker manual requests reject redirects for state and direct photos without following them', async () => {
+  for (const status of [301, 302, 307, 308]) {
+    for (const path of ['/api/state', `/api/photos/${ID}`]) {
+      const h = harness(new Response('', { status, headers: { Location: 'https://untrusted.example/redirect' } }));
+      const cookie = await h.login();
+      const response = await h.request(path, { cookie });
+      assert.equal(response.status, 502);
+      assert.equal(h.calls.length, 1);
+      assert.equal(h.calls[0].options.redirect, 'manual');
+      const text = await response.text();
+      assert.ok(!text.includes(env.GITHUB_TOKEN) && !text.includes('untrusted.example'));
+    }
+  }
 });
 
 test('tampered, duplicated, expired and secret-rotated cookies cannot authorize', async () => {

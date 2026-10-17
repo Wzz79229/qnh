@@ -104,7 +104,7 @@ export class CatalogStore {
           method: 'GET', headers: {
             Accept: 'application/vnd.github.object+json', Authorization: `Bearer ${this.#token}`,
             'User-Agent': 'qnh-shelf-life-team-backend', 'X-GitHub-Api-Version': '2026-03-10',
-          }, cache: 'no-store', redirect: 'error', credentials: 'omit', signal: controller.signal,
+          }, cache: 'no-store', redirect: 'manual', signal: controller.signal,
         });
         if (response.redirected || response.status >= 300 && response.status < 400
             || response.url && new URL(response.url).origin !== 'https://api.github.com') throw invalid();

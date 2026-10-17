@@ -44,8 +44,9 @@ test('reads a sanitized Chinese manifest from the fixed private repository witho
   assert.equal(options.method, 'GET');
   assert.equal(options.headers.Authorization, `Bearer ${TOKEN}`);
   assert.equal(options.cache, 'no-store');
-  assert.equal(options.redirect, 'error');
-  assert.equal(options.credentials, 'omit');
+  assert.equal(options.redirect, 'manual');
+  assert.equal(Object.hasOwn(options, 'credentials'), false);
+  assert.equal(options.headers.Cookie, undefined);
   assert.ok(!url.includes(TOKEN));
   assert.ok(!JSON.stringify(h.store).includes(TOKEN));
 });

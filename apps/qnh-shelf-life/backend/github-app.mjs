@@ -115,12 +115,13 @@ export function createGitHubAuthorization({ fetchImpl = globalThis.fetch, now = 
     try {
       return await Promise.race([(async () => {
         const response = await fetchImpl(ROOT + path, {
-          method: body ? 'POST' : 'GET', redirect: 'error', credentials: 'omit', cache: 'no-store', signal: controller.signal,
+          method: body ? 'POST' : 'GET', redirect: 'manual', cache: 'no-store', signal: controller.signal,
           headers: { Accept: 'application/vnd.github+json', Authorization: `Bearer ${jwt}`, 'User-Agent': 'qnh-shelf-life-github-app',
             'X-GitHub-Api-Version': '2026-03-10', ...(body ? { 'Content-Type': 'application/json' } : {}) },
           ...(body ? { body: JSON.stringify(body) } : {}),
         });
-        if (response.redirected || response.url && new URL(response.url).origin !== ROOT) throw new GitHubAuthorizationError();
+        if (response.status >= 300 && response.status <= 399 || response.redirected
+          || response.url && new URL(response.url).origin !== ROOT) throw new GitHubAuthorizationError();
         if (!response.ok) {
           if (Number.isInteger(response.status) && response.status >= 400 && response.status <= 599) upstreamStatus = response.status;
           throw new GitHubAuthorizationError();

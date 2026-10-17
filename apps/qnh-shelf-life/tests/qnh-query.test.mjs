@@ -274,8 +274,10 @@ function apiHarness() {
     assert.ok(url === `https://api.github.com/repos/Wzz79229/bzq/contents/${QNH_QUERY_PATH}?ref=main`
       || url === `https://api.github.com/repos/Wzz79229/bzq/contents/${QNH_QUERY_PATH}`);
     assert.equal(options.headers.Authorization, `Bearer ${ENV.GITHUB_TOKEN}`);
-    assert.equal(options.redirect, 'error');
-    assert.equal(options.credentials, 'omit');
+    assert.equal(options.redirect, 'manual');
+    assert.equal(Object.hasOwn(options, 'credentials'), false);
+    assert.equal(Object.hasOwn(options, 'referrerPolicy'), false);
+    assert.equal(options.headers.Cookie, undefined);
     const sha = String(revision).padStart(40, '0');
     if (options.method === 'GET') {
       const bytes = Buffer.from(JSON.stringify(data));

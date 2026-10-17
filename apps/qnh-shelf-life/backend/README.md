@@ -19,6 +19,8 @@ JWT 使用 RS256，iat 回溯 60 秒，exp 为当前时间后 9 分钟。每次�
 
 PEM 支持 GitHub 常见 PKCS#1 与 PKCS#8 RSA 格式，最少 2048 位。访问凭据仅保留在 Worker 内存，过期前 90 秒刷新；并发请求共享一次获取，配置或密钥变化隔离缓存。身份请求超时和响应大小有限制，不跟随重定向，错误不反射上游正文或凭据。业务返回 401 时清缓存，下次重新获取；不自动重试不确定的业务写入。
 
+服务端使用 Workers 支持的 `redirect:manual`，并拒绝所有 3xx、已跳转或异域响应。服务器没有浏览器 Cookie 存储，不转发调用者 Cookie，也不传入浏览器专用的 credentials/referrerPolicy 选项；共享的浏览器 GitHubStore 仍保留原策略，由服务端适配层转换。
+
 ## 员工手机登录尚未接通
 
 生产 qnh + App 模式的 /api/session 会验证固定 GitHub App 安装和受限令牌签发，成功返回 githubAuthorization:ready，失败返回 503 / githubAuthorization:unavailable；成功及失败检查缓存 30 秒，并隔离配置变更和并发请求。该检查不访问业务文件，不返回授权凭据，也不是批次保存验收。即使 GitHub 授权通过，仍返回 configured:true、authorized:false、loginMethod:qnh_pending。/api/login 不接受团队口令，批次读取、写入和手机 SKU 任务保持禁止。App 明确显示尚未接通，不会把打开牵牛花网页或电脑登录视为员工已登录。

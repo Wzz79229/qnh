@@ -28,9 +28,10 @@ function fixture({ changeInstallation = value => value, changeToken = value => v
     assert.equal(claims.iat, Math.floor(time / 1000) - 60);
     assert.ok(claims.exp <= Math.floor(time / 1000) + 600);
     assert.equal(verify('RSA-SHA256', Buffer.from(header + '.' + payload), keys.publicKey, Buffer.from(signature, 'base64url')), true);
-    assert.equal(options.redirect, 'error');
+    assert.equal(options.redirect, 'manual');
     assert.equal(options.cache, 'no-store');
-    assert.equal(options.credentials, 'omit');
+    assert.equal(Object.hasOwn(options, 'credentials'), false);
+    assert.equal(new Headers(options.headers).has('Cookie'), false);
     if (options.method === 'GET') {
       assert.equal(url, 'https://api.github.com/repos/Wzz79229/bzq/installation');
       return Response.json(changeInstallation(installation()));
@@ -152,7 +153,9 @@ function phaseFixture(phase, reply) {
     calls.push({ url, options });
     const [header, payload, signature] = options.headers.Authorization.slice(7).split('.');
     assert.equal(verify('RSA-SHA256', Buffer.from(header + '.' + payload), keys.publicKey, Buffer.from(signature, 'base64url')), true);
-    assert.equal(options.redirect, 'error');
+    assert.equal(options.redirect, 'manual');
+    assert.equal(Object.hasOwn(options, 'credentials'), false);
+    assert.equal(new Headers(options.headers).has('Cookie'), false);
     if (options.method === 'GET') {
       assert.equal(url, 'https://api.github.com/repos/Wzz79229/bzq/installation');
       if (phase === 'installation') return reply();
@@ -169,6 +172,29 @@ const PRIVATE_DIAGNOSTIC = 'PRIVATE_BODY_HEADER_AND_EXCEPTION_DO_NOT_REFLECT';
 
 for (const phase of ['installation', 'token']) {
   const expectedCode = phase === 'installation' ? 'GITHUB_APP_INSTALLATION_FAILED' : 'GITHUB_APP_TOKEN_FAILED';
+  test(`${phase} never follows redirect status, redirected response or foreign-origin response with App credentials`, async () => {
+    const redirects = [301, 302, 307, 308].map(status => () => new Response(PRIVATE_DIAGNOSTIC, {
+      status, headers: { Location: `https://untrusted.example/${PRIVATE_DIAGNOSTIC}` },
+    }));
+    const successfulBody = () => Response.json(phase === 'installation' ? installation() : issued(START));
+    redirects.push(() => {
+      const response = successfulBody();
+      Object.defineProperty(response, 'redirected', { value: true });
+      return response;
+    }, () => {
+      const response = successfulBody();
+      Object.defineProperty(response, 'url', { value: `https://untrusted.example/${PRIVATE_DIAGNOSTIC}` });
+      return response;
+    });
+    for (const reply of redirects) {
+      const f = phaseFixture(phase, reply);
+      await assert.rejects(f.token(APP), error => error.code === expectedCode && !Object.hasOwn(error, 'upstreamStatus'));
+      assert.equal(f.calls.length, phase === 'installation' ? 1 : 2);
+      assert.equal(f.calls.filter(call => call.options.method === 'POST').length, phase === 'installation' ? 0 : 1);
+      assert.ok(f.calls.every(call => new URL(call.url).origin === 'https://api.github.com'));
+    }
+  });
+
   test(`${phase} HTTP, network and invalid responses receive a fixed phase code without sensitive reflection`, async () => {
     const cases = [
       ...[400, 401, 403, 404, 422, 429, 500, 599].map(status => [() => new Response(PRIVATE_DIAGNOSTIC, {
@@ -229,6 +255,33 @@ test('malformed installation and token scope fields cannot escape classification
   }
 });
 
+test('App authorization succeeds with real RSA JWTs on a Worker fetch that rejects browser-only request options', async () => {
+  const calls = [];
+  const workerCompatibleFetch = async (url, options) => {
+    if (options.redirect === 'error') throw new TypeError('Unsupported redirect mode');
+    if (Object.hasOwn(options, 'credentials')) throw new TypeError('Unsupported credentials option');
+    calls.push({ url, options });
+    assert.equal(options.redirect, 'manual');
+    assert.equal(new Headers(options.headers).has('Cookie'), false);
+    const [header, payload, signature] = options.headers.Authorization.slice(7).split('.');
+    assert.equal(JSON.parse(Buffer.from(header, 'base64url')).alg, 'RS256');
+    assert.equal(JSON.parse(Buffer.from(payload, 'base64url')).iss, APP.GITHUB_APP_ID);
+    assert.equal(verify('RSA-SHA256', Buffer.from(header + '.' + payload), keys.publicKey, Buffer.from(signature, 'base64url')), true);
+    if (options.method === 'GET') {
+      assert.equal(url, 'https://api.github.com/repos/Wzz79229/bzq/installation');
+      return Response.json(installation());
+    }
+    assert.equal(url, 'https://api.github.com/app/installations/456/access_tokens');
+    assert.deepEqual(JSON.parse(options.body), { repositories: ['bzq'], permissions: { contents: 'write' } });
+    return Response.json(issued(START));
+  };
+  await assert.rejects(workerCompatibleFetch('https://api.github.com/test', { redirect: 'error' }), /Unsupported redirect mode/);
+  await assert.rejects(workerCompatibleFetch('https://api.github.com/test', { redirect: 'manual', credentials: 'omit' }), /Unsupported credentials option/);
+  const token = createGitHubAuthorization({ fetchImpl: workerCompatibleFetch, now: () => START, cryptoImpl: webcrypto });
+  assert.equal(await token(APP), issued(START).token);
+  assert.equal(calls.length, 2);
+});
+
 test('Worker authenticates members before minting, then uses App token for fixed state reads', async () => {
   const environment = { ...APP, MEMBER_AUTH_MODE: 'legacy', TEAM_PASSWORD: 'synthetic-admin-password', SESSION_SECRET: 'synthetic-independent-session-secret-0123456789', ALLOWED_ORIGIN: 'https://wzz79229.github.io' };
   const data = { schemaVersion: 1, records: [], settings: { urgentDays: 7, warningDays: 30 }, updatedAt: '2026-10-17T06:00:00.000Z' };
@@ -271,8 +324,9 @@ function readinessFixture({ fail = () => false, changeInstallation = value => va
     const [header, payload, signature] = jwt.split('.');
     const claims = JSON.parse(Buffer.from(payload, 'base64url'));
     assert.equal(verify('RSA-SHA256', Buffer.from(header + '.' + payload), keys.publicKey, Buffer.from(signature, 'base64url')), true);
-    assert.equal(options.redirect, 'error');
-    assert.equal(options.credentials, 'omit');
+    assert.equal(options.redirect, 'manual');
+    assert.equal(Object.hasOwn(options, 'credentials'), false);
+    assert.equal(new Headers(options.headers).has('Cookie'), false);
     await beforeFetch(call, calls.length);
     if (fail(call, calls.length)) throw new Error('PRIVATE_UPSTREAM_EXCEPTION_DO_NOT_REFLECT');
     const override = responseFor(call, calls.length);
