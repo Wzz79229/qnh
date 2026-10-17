@@ -183,7 +183,9 @@ async function autoConnect(password) {
   try {
     if(!store){const response=await fetch('./connection.json',{cache:'no-store'});if(!response.ok)throw new Error('无法读取团队连接设置。');const settings=await response.json();store=new CloudStore(settings.apiBase);}
     if(password)await store.login(password);
-    const session=await store.session();needsLogin=!session.authorized;
+    const session=await store.session();
+    if(session.loginMethod==='qnh_pending'){needsLogin=false;connected=false;connectionIssue=session.message||'牵牛花员工手机登录尚未接通，请联系管理员。';return;}
+    needsLogin=!session.authorized;
     if(needsLogin){connectionIssue='请先登录团队。';connected=false;return;}
     const incoming=await store.read();if(!incoming.data)throw new Error('团队数据文件尚未初始化。');
     const remote=sanitizeState(incoming.data);let shouldSave=false;

@@ -1,100 +1,38 @@
-# 团队数据服务（已部署，待管理员授权）
+# GitHub App 后台授权与牵牛花员工身份
 
-Cloudflare Worker 与同域 PWA 已完成首次部署：[鲜期 App](https://qnh-shelf-life-api.w792294944.workers.dev/)。首次部署源码为 `main:b5a6096ad1dbb36952551b6b5b8c71c4ffbda553`，版本为 `ddf79631-81df-4273-86cf-7a84cd66e897`。
+后台已支持管理员一次安装 GitHub App，仅读写私有 Wzz79229/bzq。配置见 [GITHUB_APP_SETUP.md](GITHUB_APP_SETUP.md)。GitHub App 不等于员工身份认证；员工手机必须直接登录牵牛花这一要求尚未接通。
 
-**本次线上复验 `/api/session` 仍返回 `SETUP_REQUIRED`，私有授权和团队共享尚未验收。** 首次检查时运行时只有 `ASSETS` 和 `ALLOWED_ORIGIN`，`GITHUB_TOKEN`、`TEAM_PASSWORD`、`SESSION_SECRET` 均未配置。本次接口结果确认配置仍不符合后台要求，但未重新查看各 Secret 的具体配置，不能据此断言每个 Secret 都缺失。聊天中的 GitHub 连接只供聊天工具使用，不能导出给公开 App 复用。
+## 当前部署配置
 
-业务记录始终保存到私有仓库 `Wzz79229/bzq` 的 `main:data/shelf-life.json`，照片保存为 `photos/<小写 UUID>.jpg`。商品快照索引固定为 `main:data/catalog.json`，不可变商品分页固定为 `data/catalog/<generation>/<index>.json`。后端拒绝客户端指定其他仓库、分支、路径或转发网址。现有前端源代码仍可以保存在 GitHub。
+- Worker: qnh-shelf-life-api，同域 PWA: https://qnh-shelf-life-api.w792294944.workers.dev/
+- Git Build 根目录: apps/qnh-shelf-life/backend；部署命令: npx wrangler deploy。
+- 构建命令仍将部署产物 ../dist/connection.json 的 apiBase 改为 /。
+- ALLOWED_ORIGIN 固定 https://wzz79229.github.io；MEMBER_AUTH_MODE 固定 qnh。
+- 运行时变量: GITHUB_APP_ID、GITHUB_APP_INSTALLATION_ID；运行时 Secret: GITHUB_APP_PRIVATE_KEY。
+- 本机桥接另外需要 QNH_CONNECTOR_KEY；无需密钥的电脑试查入口不受影响。
 
-## 管理员的一次配置
+App 模式不要求个人 GITHUB_TOKEN、员工 TEAM_PASSWORD 或旧团队会话密钥。旧 PAT/团队会话仅保留明确 legacy 模式兼容；生产 qnh 模式不接受旧团队 Cookie 或团队口令。
 
-Cloudflare 账号和首次部署已就绪。管理员仍需在 Worker → Settings → Variables & Secrets 中以运行时 Secret 安全设置下列三个敏感值；Build Variables 不能替代运行时 Secret。不要把值发进聊天、提交 Git、填入前端 connection.json 或写入 wrangler.toml。
+## 授权边界
 
-| Secret / 配置 | 要求 |
-| --- | --- |
-| `GITHUB_TOKEN` | 仓库所有者创建的专用 fine-grained PAT，仅授权 `Wzz79229/bzq`，Contents → Read and write。到期或撤销后需由管理员更新。 |
-| `TEAM_PASSWORD` | 团队访问密码，至少 12 个字符，避免重复使用其他账号密码。 |
-| `SESSION_SECRET` | 至少 32 个字符的独立高强度随机服务端密钥；不能与团队密码相同。轮换会使已有会话失效。 |
-| `ALLOWED_ORIGIN` | 非敏感配置，必须为 `https://wzz79229.github.io`，已在 wrangler.toml 中声明。 |
+JWT 使用 RS256，iat 回溯 60 秒，exp 为当前时间后 9 分钟。每次刷新先验证固定 bzq 的安装 ID、App ID、账号、Contents 写权限和未暂停状态，再请求 repositories:[bzq]、permissions:{contents:write}。响应必须只含 bzq，不能扩大权限。
 
-按代码，任一配置缺失或不合要求，合法来源的 API 请求应返回 `503 SETUP_REQUIRED`，不会访问业务数据；配置变更后的线上接口仍待复验。这里没有自动生成或保存任何密码、令牌或会话密钥。
+PEM 支持 GitHub 常见 PKCS#1 与 PKCS#8 RSA 格式，最少 2048 位。访问凭据仅保留在 Worker 内存，过期前 90 秒刷新；并发请求共享一次获取，配置或密钥变化隔离缓存。身份请求超时和响应大小有限制，不跟随重定向，错误不反射上游正文或凭据。业务返回 401 时清缓存，下次重新获取；不自动重试不确定的业务写入。
 
-## 当前 Git Build 配置
+## 员工手机登录尚未接通
 
-| 项目 | 值 |
-| --- | --- |
-| GitHub 仓库 / 生产分支 | `Wzz79229/qnh` / `main` |
-| Worker 名称 | `qnh-shelf-life-api`，与 wrangler.toml 一致 |
-| Root directory | `apps/qnh-shelf-life/backend` |
-| Build command | 下方 Node 命令，仅修改本次 Cloudflare 构建产物 |
-| Deploy command | `npx wrangler deploy` |
-| 静态资产 | wrangler.toml 的 `../dist`，绑定名 `ASSETS` |
+生产 qnh 模式的 /api/session 在仓库配置完整时返回 configured:true、authorized:false、loginMethod:qnh_pending。/api/login 不接受团队口令，批次读取、写入和手机 SKU 任务保持禁止。App 明确显示尚未接通，不会把打开牵牛花网页或电脑登录视为员工已登录。
 
-```sh
-node -e "require('node:fs').writeFileSync('../dist/connection.json',JSON.stringify({apiBase:'/'}))"
-```
+当前没有取得牵牛花官方员工身份授权接口、应用凭据及回调说明。需要官方可验证的员工和商户身份结果，才能实现每位员工手机登录后保存。商品 API 或门店整体授权不能直接充当员工身份认证。未实现电脑绑定手机方案。
 
-此命令将 Cloudflare 站点的 API 指向同域 `/api`，不会提交回 GitHub，也不会改动 `qnh/docs/shelf-life/` 的 Pages 发布文件或源码中的空配置。Wrangler 将导入的兄弟目录 `dist/core.mjs` 与 `dist/github.mjs` 一并打包。公开源码不包含 Secret，也不写入 Cloudflare `account_id`。
+## 数据与兼容接口
 
-wrangler.toml 已设置 `preview_urls = false`，用于在部署该配置后关闭版本预览 URL。正式 `workers.dev` 入口继续启用；Git Build 会在 main 更新后发布新版本。
+业务数据固定 main:data/shelf-life.json；按需商品任务固定 data/qnh-queries.json，使用预期 SHA 进行版本冲突保护。旧商品快照及照片接口保留历史兼容；新批次照片只用于手机本地 OCR，不上传。
 
-管理员完成授权后，先检查 `/api/session`，再验收一次团队登录、照片上传、记录保存和另一台手机读取；同时确认未登录请求不能读取记录或照片。当前首次部署尚不代表这些验收已通过。
+本机桥接 POST /api/qnh/bridge/claim、/result 仍要求独立 Bearer key，拒绝浏览器 Origin；不能用它充当员工登录。查询最多 20 个任务、5 分钟有效、60 秒领取租约。GitHub 文件不存在时按需创建，不预建空文件。
 
-## 使用与手机兼容性
+## 验收
 
-用户首次输入团队密码，服务端设置最长 30 天的 HMAC 签名会话 Cookie。GitHub 令牌永远不进入浏览器。Cookie 使用 `HttpOnly; Secure; SameSite=None; Partitioned`；会话到期、清除浏览器数据、更换设备或轮换会话密钥后，需要重新登录。团队密码用于共同访问，没有独立成员身份或逐人撤销；移除成员时应同时更换团队密码和会话密钥。
+测试使用临时 RSA 密钥与 mock GitHub，验证签名、PKCS#1/8、续期、并发、配置旋转、固定仓库、权限收窄、错误脱敏及身份未接入时禁止数据访问。测试不会使用真实凭据或写业务仓库。
 
-PWA 和 API 已部署在同一个 Worker 域名。wrangler.toml 提供 `ASSETS` 绑定，同域请求受 HTTPS 来源检查保护。GitHub Pages 的连接配置仍为空；若将来启用 Pages 跨域连接，则必须 `fetch(..., { credentials: 'include' })`，并且仅允许上述精确 Origin 跨域访问。Safari 及其他禁止第三方 Cookie 的浏览器可能无法保持跨站登录；`Partitioned` 不是所有浏览器都支持，不能承诺每台手机都能跨域记住登录。应继续优先使用同域入口，不能把 GitHub 令牌放进前端解决。
-
-OCR 在手机浏览器中运行。首次使用仅加载设备所需的一种内嵌 WASM core、两个 gzip 语言文件和 worker 脚本，按当前文件大小合计约 7.8 MB（约 8 MB）；不会为一次识别加载所有 core 变体或独立 `.wasm` 文件。
-
-服务端对写入检查 Origin，所有业务读取也需要有效会话；显式跨站且无可信 Origin 的请求被拒绝。API 与照片响应均为 `private, no-store`，前端 Service Worker 也应排除 API 和业务照片缓存。
-
-## 接口
-
-| 接口 | 内容 |
-| --- | --- |
-| `GET /api/session` | `{configured:true,authorized:boolean}`，不含秘密或业务数据。 |
-| `POST /api/login` | JSON `{password}`；成功后设置会话 Cookie。 |
-| `POST /api/logout` | 清除当前浏览器的 Cookie。 |
-| `GET /api/state` | 已登录才返回 `{data,sha}`；数据文件不存在时为 `{data:null,sha:null}`。 |
-| `GET /api/catalog` | 已登录才返回固定商品索引 `{schemaVersion:1,source,generation,pages,total}`。 |
-| `GET /api/catalog/pages/<index>` | 已登录才返回平铺 `{schemaVersion:1,source,products,generation,index}`，不接受 query 或客户端路径。 |
-| `PUT /api/state` | JSON `{data,expectedSha}`；校验数据和版本，返回新 `{data,sha}`。 |
-| `POST /api/photos` | JSON `{id,imageDataUrl}`，小写 UUID、JPEG data URL，图片最多 400,000 字节。返回 `{id,path}`。 |
-| `GET /api/photos/<uuid>` | 已登录才返回 JPEG 二进制。 |
-
-错误为 `{code,message}`。过期会话返回 401；SHA 冲突返回 `409 CONFLICT`，不覆盖、不合并、不自动重试。GitHub 数据 JSON 最多 1,000,000 字节；单次状态保存最多新增 12 个照片引用，每个商品批次最多 3 张。
-
-## 商品快照读取
-
-这里读取的是管理员同步到私有 `bzq` 的牵牛花快照，不是对牵牛花实时接口的代理。索引含 `source.platform: 'meituan-qnh'`、`source.syncedAt`、`source.scope` 和明确的 `source.complete`。清单或图片未核对齐全时应保留 `complete:false`，不能因文件已上传而改成完整。`imageUrl` 为空与实际图片读取失败均由前端显示占位，不以别的商品图补齐。
-
-索引上限 128 KiB、最多 100 页与 50000 个 SKU；每页最多 500 个 SKU、900000 字节，前端整份规范化快照上限 8 MiB。每次读取分页都重新读取当前索引，仅允许索引指定的同代路径，并核对 Git Blob SHA、来源和条数。代次或文件不一致返回 `409 CATALOG_CHANGED`；索引不存在返回 `404 CATALOG_NOT_READY`，不会返回虚构空库。前端须比较 `generation`，不能拼接不同代次的商品。
-
-商品字段只保留 `sku/spu/name/spec/barcodes/category/imageUrl`，编号与条码必须是字符串。官方图片源仅允许无凭据、无查询参数和片段的 HTTPS `img.meituan.net` 地址；服务器不接受任意图片代理网址。商品索引、分页、包装照片及其 API 响应都需要会话并使用 `private, no-store`；前端只在内存保存商品库，不能放入 Service Worker 业务缓存。
-
-前端先上传该次新增的全部照片，再提交含 `photoRefs:[{id,path}]` 的状态。积累超过 12 个新引用时，前端按完整商品记录分批提交，每批成功立即保留新 SHA；后续失败仍保留完整草稿。上传相同 UUID 和相同照片可以安全重试；同 UUID 的不同照片不能覆盖已有照片。状态保存会确认新增引用的照片已存在。照片与数据文件属于分开的 GitHub 提交，不是事务：状态提交失败可能留下无引用照片，现有记录不会因此被覆盖。后端不自动删除照片；管理员手工删除文件可能造成断开的引用，应先备份。
-
-登录失败在同一个 Worker isolate 内按 IP 尝试节流（15 分钟内 5 次），属于尽力而为。多实例、重启和多 IP 都可能绕过；上线团队使用前应配置 Cloudflare 的平台级限流或身份保护，不能将此内存计数当成全局防暴力破解保证。日志不得记录请求体、Cookie、GitHub 授权头或 Secret。
-
-## 验证
-
-在项目根目录运行 `npm test`，涵盖后台会话、照片、商品索引和分页 SHA/来源/代次校验、检索与明确选择规则。测试使用注入的 fetch、时钟与 WebCrypto，不访问真实 GitHub，也不部署云服务。实际部署后的 Cookie、手机浏览器跨域行为、GitHub 权限与商品/图片覆盖范围需单独验收，合成视觉测试不能替代这些确认。
-
-## 当前主流程：SKU 实时查询与日期批次
-
-前面的商品快照和包装照片上传接口仅保留历史兼容。新版 App 不再读取全量商品库，新批次不上传包装照片；照片只用于本机 OCR，保存 SKU 对应的日期、保质期、清点件数和计算的到期日。历史文件不删除。
-
-新增管理员 Secret `QNH_CONNECTOR_KEY`（至少32位、无空白，不能与其他 Secret 相同）。连接程序只从电脑发起 HTTPS 请求，无 Origin，不建立公网隧道；成员浏览器不能用团队 Cookie 代替连接密钥。安装与首次独立浏览器登录见 `../local-query/README.md`。
-
-| 路径 | 内容 |
-| --- | --- |
-| `POST /api/qnh/queries` | 团队会话及可信 Origin；`{sku}`，返回202 `{id,status}` |
-| `GET /api/qnh/queries/<uuid>` | 团队会话，返回本次任务状态及单SKU结果；不返回领取密钥 |
-| `POST /api/qnh/bridge/claim` | 仅独立 Bearer key，无请求体；返回单个 `{job}` 或 null |
-| `POST /api/qnh/bridge/result` | 仅独立 Bearer key；`{id,leaseToken,result}`，结果必须精确匹配任务SKU |
-
-队列固定私有 `bzq/data/qnh-queries.json`，最多20任务，每任务5分钟；领取租约60秒。明确409最多3次CAS尝试；超时、未知写入和权限错误不自动重试。过期任务在创建新任务时回收，GitHub提交历史仍保留。查询结果只含白名单商品资料，任意网页错误正文不会保存或回传；缺图只保留预定义固定消息。
-
-公开Pages的 `connection.json` 现在包含公开Worker地址，同域Cloudflare构建仍覆盖为`/`；苹果等限制跨站Cookie的手机优先使用同域入口。新版验收应确认扫描SKU→电脑查询→日期OCR→手填件数→保存，并确认没有 `/api/photos` 上传。四个Secret缺失或电脑未登录时不能声称已接通。
+只有管理员实际安装与配置成功、接入员工身份、再通过手机扫码查询和无照片批次保存测试，才算整体上线完成。源码部署成功或 /api/session 的 configured:true 不证明 GitHub 写权限已实测。
