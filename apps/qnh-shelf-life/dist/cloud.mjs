@@ -17,7 +17,7 @@ export class CloudStore {
       const response=await this.#fetch(`${this.#base}/api/${route}`,{method,credentials:'include',cache:'no-store',redirect:'error',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,signal:controller.signal});
       if(route.startsWith('photos/')&&response.ok)return await response.blob();
       const data=await response.json().catch(()=>({}));
-      if(!response.ok){if(response.status===409&&!route.startsWith('catalog'))throw new ConflictError();throw new GitHubError(data.message||'团队连接暂时不可用，照片和草稿仍保留在本页。',data.code||'CLOUD_ERROR',response.status);}
+      if(!response.ok){if(response.status===409&&!route.startsWith('catalog')&&!route.startsWith('qnh/'))throw new ConflictError();throw new GitHubError(data.message||'团队连接暂时不可用，草稿仍保留在本页。',data.code||'CLOUD_ERROR',response.status);}
       return data;
     } catch(error){if(error instanceof GitHubError)throw error;throw new GitHubError('无法连接团队服务。请保持页面打开，联网后重试，或先备份照片草稿。','NETWORK_ERROR');}
     finally{clearTimeout(timer);}
@@ -26,6 +26,8 @@ export class CloudStore {
   login(password){return this.#request('login','POST',{password});}
   logout(){return this.#request('logout','POST',{});}
   read(){return this.#request('state');}
+  createSkuQuery(sku){return this.#request('qnh/queries','POST',{sku});}
+  skuQuery(id){return this.#request(`qnh/queries/${encodeURIComponent(id)}`);}
   catalog(){return this.#request('catalog');}
   catalogPage(index){
     if(!Number.isSafeInteger(index)||index<0||index>=100)throw new GitHubError('商品库页码无效。','INVALID_CATALOG_PAGE');

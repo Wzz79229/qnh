@@ -1,6 +1,7 @@
 import { GitHubStore, GitHubError, ConflictError } from '../dist/github.mjs';
 import { sanitizeState } from '../dist/core.mjs';
 import { CatalogStore, CatalogStoreError } from './catalog-store.mjs';
+import { QnhQueryQueue, QnhQueryError, QNH_QUERY_PATH } from './qnh-query.mjs';
 
 // There is deliberately no client-supplied GitHub owner, repository, branch, or URL.
 const TARGET = Object.freeze({ owner: 'Wzz79229', repo: 'bzq', branch: 'main', path: 'data/shelf-life.json' });
@@ -257,6 +258,37 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
     return new GitHubStore({ ...TARGET, token: env.GITHUB_TOKEN, timeoutMs: 20_000 }, serverFetch);
   }
 
+  function queryQueue(env) {
+    const serverFetch = (url, options) => fetchImpl(url, {
+      ...options, headers: { ...options.headers, 'User-Agent': 'qnh-shelf-life-team-backend' },
+    });
+    const store = new GitHubStore({ ...TARGET, path: QNH_QUERY_PATH, token: env.GITHUB_TOKEN, timeoutMs: 20_000 }, serverFetch);
+    return new QnhQueryQueue(store, { now, cryptoImpl });
+  }
+
+  function connectorKey(env) {
+    const key = env.QNH_CONNECTOR_KEY;
+    if (typeof key !== 'string' || key.length < 32 || key.length > 512
+      || !/^[A-Za-z0-9._~+/-]+=*$/.test(key)
+      || [env.TEAM_PASSWORD, env.SESSION_SECRET, env.GITHUB_TOKEN].includes(key)) {
+      throw new ApiError(503, 'QNH_CONNECTOR_NOT_CONFIGURED', '牵牛花本机连接尚未配置，请先由管理员配置连接密钥并启动电脑连接程序。');
+    }
+    return key;
+  }
+
+  async function authorizeBridge(request, env) {
+    const expected = connectorKey(env);
+    // The bridge is an outbound native process. Browser cookies and CORS cannot authorize it.
+    if (request.headers.has('Origin') || ['cross-site', 'same-site', 'same-origin'].includes(request.headers.get('Sec-Fetch-Site'))) {
+      throw new ApiError(403, 'QNH_BRIDGE_ORIGIN_DENIED', '本机连接接口不接受网页调用。');
+    }
+    const header = request.headers.get('Authorization') || '';
+    const match = /^Bearer ([A-Za-z0-9._~+/-]+=*)$/.exec(header);
+    if (!match || match[1].length > 512 || !await passwordMatches(match[1], expected)) {
+      throw new ApiError(401, 'QNH_CONNECTOR_AUTH_REQUIRED', '本机连接密钥无效，请检查电脑连接程序配置。');
+    }
+  }
+
   return {
     async fetch(request, rawEnv = {}) {
       const url = new URL(request.url);
@@ -266,17 +298,31 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
       try {
         if (url.protocol !== 'https:') throw new ApiError(400, 'HTTPS_REQUIRED', '团队数据服务必须通过 HTTPS 访问。');
         const mutations = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
-        checkOrigin(request, mutations || request.method === 'OPTIONS');
+        const bridgeRoute = ['/api/qnh/bridge/claim', '/api/qnh/bridge/result'].includes(url.pathname);
+        if (!bridgeRoute) checkOrigin(request, mutations || request.method === 'OPTIONS');
         const env = configuration(rawEnv);
         const methods = new Map([
           ['/api/session', ['GET']], ['/api/login', ['POST']], ['/api/logout', ['POST']],
           ['/api/state', ['GET', 'PUT']], ['/api/photos', ['POST']],
           ['/api/catalog', ['GET']],
+          ['/api/qnh/queries', ['POST']],
+          ['/api/qnh/bridge/claim', ['POST']], ['/api/qnh/bridge/result', ['POST']],
         ]);
         const photoMatch = /^\/api\/photos\/([^/]+)$/.exec(url.pathname);
         const catalogPageMatch = /^\/api\/catalog\/pages\/(0|[1-9]\d?)$/.exec(url.pathname);
-        const supported = methods.get(url.pathname) || (photoMatch || catalogPageMatch ? ['GET'] : null);
+        const queryMatch = /^\/api\/qnh\/queries\/([^/]+)$/.exec(url.pathname);
+        const supported = methods.get(url.pathname) || (photoMatch || catalogPageMatch || queryMatch ? ['GET'] : null);
         if (!supported || url.search) throw new ApiError(404, 'NOT_FOUND', '未找到接口。');
+        if (bridgeRoute) {
+          if (request.method !== 'POST') throw new ApiError(405, 'METHOD_NOT_ALLOWED', '不支持此请求方式。', { Allow: 'POST' });
+          await authorizeBridge(request, env);
+          const queue = queryQueue(env);
+          if (url.pathname === '/api/qnh/bridge/claim') {
+            if (request.body !== null) throw new ApiError(400, 'INVALID_QNH_QUERY', '领取查询任务不接受请求体。');
+            return json(request, await queue.claim());
+          }
+          return json(request, await queue.submit(await readJSON(request, 16_384)));
+        }
         if (request.method === 'OPTIONS') {
           if (!supported.includes(request.headers.get('Access-Control-Request-Method'))
             || (request.headers.get('Access-Control-Request-Headers') || '').split(',').some(header => header.trim() && header.trim().toLowerCase() !== 'content-type')) {
@@ -310,6 +356,14 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
         }
         if (url.pathname === '/api/logout') return json(request, { configured: true, authorized: false }, 200, { 'Set-Cookie': cookie('', true) });
         if (!active) throw new ApiError(401, 'AUTH_REQUIRED', '请先输入团队访问密码。');
+        if (url.pathname === '/api/qnh/queries' || queryMatch) {
+          connectorKey(env);
+          const queue = queryQueue(env);
+          if (queryMatch) return json(request, await queue.get(queryMatch[1]));
+          const input = await readJSON(request, 1_024);
+          exactKeys(input, ['sku']);
+          return json(request, await queue.enqueue(input.sku), 202);
+        }
         if (url.pathname === '/api/catalog' || catalogPageMatch) {
           const catalog = new CatalogStore({ token: env.GITHUB_TOKEN }, fetchImpl, cryptoImpl);
           return json(request, catalogPageMatch ? await catalog.page(Number(catalogPageMatch[1])) : await catalog.read());
@@ -371,6 +425,7 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
       } catch (error) {
         if (error instanceof ApiError) return json(request, { code: error.code, message: error.message }, error.status, error.headers);
         if (error instanceof CatalogStoreError) return json(request, { code: error.code, message: error.message }, error.status);
+        if (error instanceof QnhQueryError) return json(request, { code: error.code, message: error.message }, error.status);
         if (error instanceof ConflictError) return json(request, { code: 'CONFLICT', message: '其他成员已修改数据，请保留本机草稿，拉取最新数据后再保存。' }, 409);
         if (error instanceof GitHubError) {
           const status = error.code === 'RATE_LIMITED' ? 429 : error.code === 'TIMEOUT' ? 504 : error.code === 'DATA_TOO_LARGE' ? 413 : 502;

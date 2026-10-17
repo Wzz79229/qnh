@@ -1,0 +1,7 @@
+{
+  "package": "@zxing/library",
+  "version": "0.23.0",
+  "source": "https://registry.npmjs.org/@zxing/library/-/library-0.23.0.tgz",
+  "license": "Apache-2.0",
+  "files": {"index.min.js": "3ede94153fb0c5b67a12d7adff6decd827c2b22714fdc6faecf27a8f20937ea6"}
+}

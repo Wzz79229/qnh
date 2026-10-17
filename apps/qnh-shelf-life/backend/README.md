@@ -81,3 +81,20 @@ OCR 在手机浏览器中运行。首次使用仅加载设备所需的一种内�
 ## 验证
 
 在项目根目录运行 `npm test`，涵盖后台会话、照片、商品索引和分页 SHA/来源/代次校验、检索与明确选择规则。测试使用注入的 fetch、时钟与 WebCrypto，不访问真实 GitHub，也不部署云服务。实际部署后的 Cookie、手机浏览器跨域行为、GitHub 权限与商品/图片覆盖范围需单独验收，合成视觉测试不能替代这些确认。
+
+## 当前主流程：SKU 实时查询与日期批次
+
+前面的商品快照和包装照片上传接口仅保留历史兼容。新版 App 不再读取全量商品库，新批次不上传包装照片；照片只用于本机 OCR，保存 SKU 对应的日期、保质期、清点件数和计算的到期日。历史文件不删除。
+
+新增管理员 Secret `QNH_CONNECTOR_KEY`（至少32位、无空白，不能与其他 Secret 相同）。连接程序只从电脑发起 HTTPS 请求，无 Origin，不建立公网隧道；成员浏览器不能用团队 Cookie 代替连接密钥。安装与首次独立浏览器登录见 `../local-query/README.md`。
+
+| 路径 | 内容 |
+| --- | --- |
+| `POST /api/qnh/queries` | 团队会话及可信 Origin；`{sku}`，返回202 `{id,status}` |
+| `GET /api/qnh/queries/<uuid>` | 团队会话，返回本次任务状态及单SKU结果；不返回领取密钥 |
+| `POST /api/qnh/bridge/claim` | 仅独立 Bearer key，无请求体；返回单个 `{job}` 或 null |
+| `POST /api/qnh/bridge/result` | 仅独立 Bearer key；`{id,leaseToken,result}`，结果必须精确匹配任务SKU |
+
+队列固定私有 `bzq/data/qnh-queries.json`，最多20任务，每任务5分钟；领取租约60秒。明确409最多3次CAS尝试；超时、未知写入和权限错误不自动重试。过期任务在创建新任务时回收，GitHub提交历史仍保留。查询结果只含白名单商品资料，任意网页错误正文不会保存或回传；缺图只保留预定义固定消息。
+
+公开Pages的 `connection.json` 现在包含公开Worker地址，同域Cloudflare构建仍覆盖为`/`；苹果等限制跨站Cookie的手机优先使用同域入口。新版验收应确认扫描SKU→电脑查询→日期OCR→手填件数→保存，并确认没有 `/api/photos` 上传。四个Secret缺失或电脑未登录时不能声称已接通。
