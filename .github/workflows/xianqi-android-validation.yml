@@ -148,7 +148,7 @@ jobs:
           mkdir -p output/native-qa
           timeout 180 adb shell am instrument -w com.xianqi.phonevalidation.test/com.xianqi.phonevalidation.LabelInstrumentation | tee output/native-qa/portrait.log
           python -c "from pathlib import Path; assert 'CHECKS PASSED' in Path('output/native-qa/portrait.log').read_text()"
-          for file in label-native.png label-regression.png workspace-query.png workspace-label.png workspace-batch.png batch-001.png batch-002.png gallery-check.json; do
+          for file in label-native.png label-regression.png workspace-query.png workspace-label.png workspace-batch.png batch-001.png batch-002.png gallery-check.json labels-batch.pdf pdf-page-1.png pdf-page-2.png pdf-check.json; do
             adb exec-out run-as com.xianqi.phonevalidation cat "files/$file" > "output/native-qa/$file"
           done
           adb shell wm size 1920x1200

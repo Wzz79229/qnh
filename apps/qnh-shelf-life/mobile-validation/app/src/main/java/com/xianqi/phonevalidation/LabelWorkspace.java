@@ -15,11 +15,11 @@ import android.os.Bundle;
 
 /** One responsive screen: query, immutable product details and automatically rendered label. */
 public final class LabelWorkspace extends FrameLayout {
-    public interface Actions {void back();void save();void share();default void previous(){}default void next(){}}
+    public interface Actions {void back();void save();void share();default void pdf(){}default void previous(){}default void next(){}}
     public final InventorySearchPanel search;
     public final LinearLayout productCard;
     public final ImageView preview;
-    public final Button save,share,previous,next;
+    public final Button save,share,pdf,previous,next;
     private final Activity activity;
     private final LinearLayout body,previewCard,placeholder;
     private final TextView productName,spec,sku,location,store,status;
@@ -51,7 +51,7 @@ public final class LabelWorkspace extends FrameLayout {
         status=WarehouseUi.text(activity,"300 DPI PNG · 完整 SKU 条码",12,WarehouseUi.MUTED,false);previewCard.addView(status);WarehouseUi.space(previewCard,14);
         pageNavigation=new LinearLayout(activity);pageNavigation.setGravity(Gravity.CENTER_VERTICAL);previous=WarehouseUi.button(activity,"上一张",false,v->actions.previous());previous.setTag("batch-previous");next=WarehouseUi.button(activity,"下一张",false,v->actions.next());next.setTag("batch-next");pageNumber=WarehouseUi.text(activity,"",12,WarehouseUi.INK,true);pageNumber.setGravity(Gravity.CENTER);pageNavigation.addView(previous,new LinearLayout.LayoutParams(0,dp(44),1));pageNavigation.addView(pageNumber,new LinearLayout.LayoutParams(0,-2,1));pageNavigation.addView(next,new LinearLayout.LayoutParams(0,dp(44),1));pageNavigation.setVisibility(GONE);previewCard.addView(pageNavigation);WarehouseUi.space(previewCard,10);
         LinearLayout exports=new LinearLayout(activity);save=WarehouseUi.button(activity,"保存图片",true,v->actions.save());share=WarehouseUi.button(activity,"分享图片",false,v->actions.share());
-        LinearLayout.LayoutParams first=new LinearLayout.LayoutParams(0,dp(46),1);first.setMarginEnd(dp(8));exports.addView(save,first);exports.addView(share,new LinearLayout.LayoutParams(0,dp(46),1));previewCard.addView(exports);arrange(false);setActions(false);
+        LinearLayout.LayoutParams first=new LinearLayout.LayoutParams(0,dp(46),1);first.setMarginEnd(dp(8));exports.addView(save,first);exports.addView(share,new LinearLayout.LayoutParams(0,dp(46),1));previewCard.addView(exports);WarehouseUi.space(previewCard,8);pdf=WarehouseUi.button(activity,"保存 PDF",false,v->actions.pdf());pdf.setTag("save-pdf");previewCard.addView(pdf,new LinearLayout.LayoutParams(-1,dp(46)));arrange(false);setActions(false);
         setOnApplyWindowInsetsListener((view,insets)->{setPadding(0,insets.getSystemWindowInsetTop(),0,insets.getSystemWindowInsetBottom());return insets;});setFocusableInTouchMode(true);requestFocus();
     }
     private void arrange(boolean next){wide=next;body.removeAllViews();body.setOrientation(next?LinearLayout.HORIZONTAL:LinearLayout.VERTICAL);
@@ -67,6 +67,6 @@ public final class LabelWorkspace extends FrameLayout {
     public void showImage(Bitmap image){showPage(image,0,1);}
     public void showPage(Bitmap image,int index,int total){pageIndex=index;pageTotal=total;preview.setImageBitmap(image);preview.setVisibility(VISIBLE);placeholder.setVisibility(GONE);pageNavigation.setVisibility(total>1?VISIBLE:GONE);pageNumber.setText((index+1)+" / "+total);save.setText(total>1?"保存全部图片":"保存图片");share.setText(total>1?"批量分享":"分享图片");setActions(true);status.setText(total>1?"已生成 "+total+" 张 · 每张 80×60 mm / 300 DPI":"已自动生成 · 945 × 709 px · 300 DPI");}
     public void message(String value){status.setText(value);}
-    public void setActions(boolean enabled){save.setEnabled(enabled);share.setEnabled(enabled);previous.setEnabled(enabled&&pageIndex>0);next.setEnabled(enabled&&pageIndex+1<pageTotal);}
+    public void setActions(boolean enabled){save.setEnabled(enabled);share.setEnabled(enabled);pdf.setEnabled(enabled);previous.setEnabled(enabled&&pageIndex>0);next.setEnabled(enabled&&pageIndex+1<pageTotal);}
     public void revealResult(){post(()->scroll.smoothScrollTo(0,Math.max(0,body.getTop()-dp(12))));}
 }

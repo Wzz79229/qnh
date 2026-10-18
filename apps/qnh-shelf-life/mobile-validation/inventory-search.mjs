@@ -81,7 +81,7 @@ export function createInventorySearch({shell=readLoggedInQnhShell,tenant=readObs
       for(let attempt=0;fresh&&!identity()&&!requiresLogin()&&current===generation&&attempt<20;attempt++)await new Promise(resolve=>setTimeout(resolve,150));
       if(current!==generation)return;const currentControl=controls();
       if(!fresh||!matches(scope)||!currentControl||!sameInputs(currentControl,filters)||!inventoryFilterReceipt(location.href,filters,page,stamp,newStamp))throw Error('STALE');
-      const rows=readRows(currentControl).map(row=>row.data);receipt=location.href;state={...state,status:rows.length?'found':'not_found',rows,pagination:pagination(currentControl)};
+      const rows=readRows(currentControl).map(row=>row.data);receipt=location.href;state={...state,status:rows.length?'found':'not_found',rows,receipt,pagination:pagination(currentControl)};
     }catch{if(current===generation)state={status:'error',requestId:String(requestId),tenantId:scope};}})();return true;
   }
   return Object.freeze({version:2,cancel,
@@ -92,6 +92,7 @@ export function createInventorySearch({shell=readLoggedInQnhShell,tenant=readObs
       return {...state,authorized:true,authState:'authenticated',tenantId:id,productReady:Boolean(control),store:control?.root.querySelector('.wms-roo-picker-value-list')?.innerText.trim()||''};
     },
     search(requestId,raw,scope){let filters;try{filters=normalizeInventoryFilters(raw);}catch{return false;}return execute(requestId,filters,scope,1,c=>c.button.click(),true);},
+    resume(requestId,raw,scope,page,expectedReceipt,expectedRows){try{const filters=normalizeInventoryFilters(raw),control=controls();if(!/^\d{1,15}$/u.test(String(requestId))||!matches(scope)||!inventoryPage(location.href)||location.href!==expectedReceipt||!control||!sameInputs(control,filters)||!inventoryFilterReceipt(location.href,filters,page,null,false)||!Array.isArray(expectedRows)||expectedRows.length>100)return false;const rows=readRows(control).map(row=>row.data);if(!rows.length||JSON.stringify(rows.map(row=>[row.name,row.spec,row.store,row.loc]))!==JSON.stringify(expectedRows.map(row=>[row.name,row.spec,row.store,row.loc])))return false;cancel();receipt=location.href;state={status:'found',requestId:String(requestId),tenantId:scope,filters,rows,receipt,pagination:pagination(control)};return true;}catch{return false;}},
     page(requestId,direction,scope){if(!['found','not_found','selected'].includes(state.status)||![-1,1].includes(direction)||!matches(scope)||location.href!==receipt)return false;
       const control=controls(),button=control?.root.querySelector('.wms-ant-pagination-'+(direction===1?'next':'prev')+' button');if(!button||button.disabled)return false;
       return execute(requestId,state.filters,scope,Number(queryOf(location.href).get('current'))+direction,()=>button.click(),false);

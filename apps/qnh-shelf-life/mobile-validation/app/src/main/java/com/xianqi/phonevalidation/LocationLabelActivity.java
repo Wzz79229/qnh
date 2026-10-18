@@ -36,10 +36,12 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
     private LabelBatch permissionBatch;
     private long permissionTicket;
     private String scannerTenant="",scanValue,scanFormat;
+    private LabelBatch pdfBatch;private long pdfTicket;private Uri pdfTarget;
 
     @Override public void onCreate(Bundle state){super.onCreate(state);
         ui=new LabelWorkspace(this,this,state,new LabelWorkspace.Actions(){
             public void back(){finish();}public void save(){saveImages();}public void share(){shareImages();}
+            public void pdf(){savePdf();}
             public void previous(){showPage(page-1);}public void next(){showPage(page+1);}
         });setContentView(ui);
         if(state!=null)try{scannerTenant=state.getString("scanner-tenant","");String raw=state.getString("selected-rows","");if(!raw.isEmpty()&&raw.length()<200000){restored=new JSONArray(raw);restoredTenant=state.getString("selected-tenant","");}}catch(Exception ignored){}
@@ -51,7 +53,7 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
     @Override public void onBatchSelected(JSONArray rows){if(requireQnhAccess())renderRows(rows,true);}
     @Override public void onScan(){if(requireQnhAccess()){scannerTenant=qnh.tenant();startActivityForResult(new Intent(this,BarcodeScanActivity.class),62);}}
     private void consumeScan(){if(scanValue==null)return;String value=scanValue,format=scanFormat;scanValue=null;if(scannerTenant.equals(qnh.tenant()))ui.search.scanned(value,format);else ui.search.message("登录租户已改变，请重新扫码。");}
-    private void clearSelection(){outputFence.incrementAndGet();pageRequest++;selection.clear();restored=null;selectedRows=null;batch=null;sharedBatch=null;sharedFiles=null;page=0;permissionBatch=null;exporting=false;if(renderJob!=null)renderJob.cancel(false);ui.clear();releaseBitmap();}
+    private void clearSelection(){outputFence.incrementAndGet();pageRequest++;selection.clear();restored=null;selectedRows=null;batch=null;sharedBatch=null;sharedFiles=null;page=0;permissionBatch=null;pdfBatch=null;pdfTarget=null;exporting=false;if(renderJob!=null)renderJob.cancel(false);ui.clear();releaseBitmap();}
     private void releaseBitmap(){ui.preview.setImageDrawable(null);if(bitmap!=null&&!bitmap.isRecycled())bitmap.recycle();bitmap=null;}
     private boolean current(long ticket,String tenant){return !destroyed&&outputFence.get()==ticket&&batch!=null&&batch.tenant.equals(tenant);}
     private void renderRows(JSONArray rows,boolean reveal){
@@ -88,12 +90,14 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
             runOnUiThread(()->{if(!current(ticket,captured.tenant)||request!=pageRequest){if(image!=null)image.recycle();return;}if(image==null){ui.setActions(true);ui.message("预览未能加载，请重试。");return;}releaseBitmap();bitmap=image;page=index;ui.showRecord(captured.get(index).content,captured.get(index).store);ui.showPage(image,index,captured.size());});
         });
     }
-    @Override protected void onAuthenticated(){ui.search.authenticated();if(scanValue!=null){restored=null;consumeScan();}else if(restored!=null){JSONArray rows=restored;restored=null;if(qnh.tenant().equals(restoredTenant))renderRows(rows,false);}else if(batch!=null&&bitmap==null)showPage(page);}
+    @Override protected void onAuthenticated(){ui.search.authenticated();if(scanValue!=null){restored=null;consumeScan();}else if(restored!=null){JSONArray rows=restored;restored=null;if(qnh.tenant().equals(restoredTenant))renderRows(rows,false);}else if(batch!=null&&bitmap==null)showPage(page);if(pdfTarget!=null)consumePdf();}
     @Override protected void onAuthenticatedSnapshot(JSONObject value){ui.search.snapshot(value);}
     @Override protected void onSessionUnavailable(){ui.search.suspended();scanValue=null;clearSelection();}
     @Override protected void onTenantChanged(){ui.search.clearTenant();clearSelection();}
     @Override public void onQnhMessage(String value){ui.search.message(value);}
     private boolean canExport(){return requireQnhAccess()&&batch!=null&&!exporting&&batch.tenant.equals(qnh.tenant());}
+    private void savePdf(){if(!canExport())return;pdfBatch=batch;pdfTicket=outputFence.get();exporting=true;ui.setActions(false);Intent create=new Intent(Intent.ACTION_CREATE_DOCUMENT);create.addCategory(Intent.CATEGORY_OPENABLE);create.setType("application/pdf");create.putExtra(Intent.EXTRA_TITLE,"库管标签_"+batch.size()+"张_"+System.currentTimeMillis()+".pdf");try{startActivityForResult(create,63);}catch(Exception error){pdfBatch=null;exporting=false;ui.setActions(true);ui.message("未找到文件保存程序，请使用图片保存或分享。");}}
+    private void consumePdf(){LabelBatch captured=pdfBatch;Uri target=pdfTarget;long ticket=pdfTicket;pdfTarget=null;pdfBatch=null;if(captured==null||captured!=batch||ticket!=outputFence.get()||!captured.tenant.equals(qnh.tenant())){exporting=false;if(batch!=null)ui.setActions(true);return;}ui.message("正在保存 PDF · "+captured.size()+"页…");renderer.submit(()->{File temp=null;try{temp=File.createTempFile("kuguan-labels-",".pdf",getCacheDir());try(java.io.OutputStream out=new java.io.FileOutputStream(temp)){LabelPdf.write(captured,out,()->outputFence.get()==ticket);}if(outputFence.get()!=ticket)throw new java.io.IOException("已取消保存。");try(java.io.InputStream in=new java.io.FileInputStream(temp);java.io.OutputStream out=getContentResolver().openOutputStream(target,"w")){if(out==null)throw new java.io.IOException("文件无法写入。");byte[] bytes=new byte[8192];int n;while((n=in.read(bytes))!=-1){if(outputFence.get()!=ticket)throw new java.io.IOException("已取消保存。");out.write(bytes,0,n);}}runOnUiThread(()->{if(!current(ticket,captured.tenant))return;exporting=false;ui.setActions(true);ui.message("PDF 已保存 · "+captured.size()+"页，每页80×60毫米");if(bitmap==null)showPage(page);});}catch(Exception error){runOnUiThread(()->{if(!current(ticket,captured.tenant))return;exporting=false;ui.setActions(true);ui.message("PDF 未保存完成，请检查剩余空间后重试。");});}finally{if(temp!=null)temp.delete();}});}
     private void saveImages(){
         if(!canExport())return;
         if(Build.VERSION.SDK_INT<=28&&checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)!=PackageManager.PERMISSION_GRANTED){permissionBatch=batch;permissionTicket=outputFence.get();requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},51);return;}
@@ -114,7 +118,7 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
     private void purgeShareCache(File rootFolder,File preserve){File[] folders=rootFolder.listFiles();if(folders==null)return;long cutoff=System.currentTimeMillis()-24*60*60*1000L;for(File folder:folders)if(folder.isDirectory()&&!folder.equals(preserve)&&folder.getName().matches("[0-9a-f-]{36}")&&folder.lastModified()<cutoff){File[] files=folder.listFiles();if(files!=null)for(File file:files)if(file.isFile()&&file.getName().endsWith(".png"))file.delete();folder.delete();}}
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);if(request==51){LabelBatch pending=permissionBatch;permissionBatch=null;if(pending!=null&&pending==batch&&permissionTicket==outputFence.get()&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)saveImages();else ui.message("未获相册保存权限，可使用分享图片。");}}
     @Override protected void onPause(){ui.search.paused();super.onPause();}
-    @Override public void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==62&&result==RESULT_OK&&data!=null){scanValue=data.getStringExtra("value");scanFormat=data.getStringExtra("format");if(active()&&requireQnhAccess())consumeScan();}}
+    @Override public void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==62&&result==RESULT_OK&&data!=null){scanValue=data.getStringExtra("value");scanFormat=data.getStringExtra("format");if(active()&&requireQnhAccess())consumeScan();}if(request==63){if(result==RESULT_OK&&data!=null&&data.getData()!=null){pdfTarget=data.getData();if(active()&&requireQnhAccess())consumePdf();}else{pdfBatch=null;pdfTarget=null;exporting=false;if(batch!=null)ui.setActions(true);}}}
     @Override protected void onSaveInstanceState(Bundle out){ui.search.saveState(out);out.putString("scanner-tenant",scannerTenant);if(selectedRows!=null){String raw=selectedRows.toString();if(raw.length()<200000)out.putString("selected-rows",raw);out.putString("selected-tenant",selection.tenant());}super.onSaveInstanceState(out);}
     @Override public void onTrimMemory(int level){super.onTrimMemory(level);if(level>=TRIM_MEMORY_RUNNING_LOW&&batch!=null&&!isQnhScreenActive())releaseBitmap();}
     @Override public void onDestroy(){destroyed=true;outputFence.incrementAndGet();pageRequest++;selection.clear();if(renderJob!=null)renderJob.cancel(false);renderer.shutdownNow();ui.search.destroy();releaseBitmap();batch=null;super.onDestroy();}

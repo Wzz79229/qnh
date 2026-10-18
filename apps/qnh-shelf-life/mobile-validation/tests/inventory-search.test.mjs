@@ -79,3 +79,11 @@ test('region batches may page after selection only with a fresh matching page re
  h.control.root.querySelector=selector=>selector.includes('pagination-next')?{disabled:false,click(){location.href=receipt(f,'2',2);}}:null;
  assert.equal(h.runtime.page('2',1,'999'),false);assert.equal(h.runtime.page('2',1,'777'),true);h.waiters[1].resolve(true);await h.settle();assert.equal(h.runtime.inspect().status,'found');assert.equal(h.runtime.inspect().requestId,'2');
 });
+
+test('a recreated inventory runtime resumes only the exact observed query, scope and rows',async t=>{
+ const h=harness(t);h.runtime.search('1',filters,'777');h.waiters[0].resolve(true);await h.settle();const expected=location.href;h.runtime.select('1',0,'777');h.state.card={name:row.name,sku:SKU};h.runtime.inspect();location.href=expected;h.runtime.cancel();
+ assert.equal(h.runtime.resume('1',filters,'888',1,expected,[row]),false);
+ assert.equal(h.runtime.resume('1',filters,'777',1,expected.replace('_t=2','_t=99'),[row]),false);
+ assert.equal(h.runtime.resume('1',filters,'777',1,expected,[{...row,loc:'C55-3-99'}]),false);
+ assert.equal(h.runtime.resume('1',filters,'777',1,expected,[{store:row.store,loc:row.loc,spec:row.spec,name:row.name}]),true);assert.equal(h.runtime.select('1',0,'777'),true);
+});
