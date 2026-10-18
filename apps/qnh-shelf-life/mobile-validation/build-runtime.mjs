@@ -7,3 +7,10 @@ await build({
   bundle: true, platform: 'browser', format: 'iife', target: 'chrome80',
   keepNames: false, sourcemap: false, minify: false, legalComments: 'none',
 });
+
+await build({
+  entryPoints: [fileURLToPath(new URL('./batch-entry.mjs', import.meta.url))],
+  outfile: fileURLToPath(new URL('./app/src/main/assets/batch.js', import.meta.url)),
+  bundle: true, platform: 'browser', format: 'iife', target: 'chrome80',
+  keepNames: false, sourcemap: false, minify: false, legalComments: 'none',
+});

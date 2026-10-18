@@ -8,6 +8,8 @@ on:
       - apps/qnh-shelf-life/local-query/extract.mjs
       - apps/qnh-shelf-life/backend/qnh-browser-session.mjs
       - apps/qnh-shelf-life/backend/qnh-product-proof.mjs
+      - apps/qnh-shelf-life/dist/core.mjs
+      - apps/qnh-shelf-life/dist/photo-parser.mjs
       - apps/qnh-shelf-life/package-lock.json
       - .github/workflows/xianqi-android-validation.yml
   workflow_dispatch:
@@ -46,27 +48,29 @@ jobs:
       - name: Verify phone query runtime
         run: |
           npm ci --ignore-scripts
-          node --test mobile-validation/tests/*.test.mjs
+          node --test mobile-validation/tests/*.test.mjs tests/photo-parser.test.mjs tests/core.test.mjs
           node mobile-validation/build-runtime.mjs
       - name: Verify native URL boundaries
         run: |
           mkdir -p mobile-validation/build/url-policy
-          javac -d mobile-validation/build/url-policy mobile-validation/app/src/main/java/com/xianqi/phonevalidation/QnhUrlPolicy.java mobile-validation/tests/UrlPolicyTest.java
+          javac -d mobile-validation/build/url-policy mobile-validation/app/src/main/java/com/xianqi/phonevalidation/QnhUrlPolicy.java mobile-validation/app/src/main/java/com/xianqi/phonevalidation/SkuPolicy.java mobile-validation/tests/UrlPolicyTest.java
           java -cp mobile-validation/build/url-policy com.xianqi.phonevalidation.UrlPolicyTest
       - name: Build and lint Android APK
         working-directory: apps/qnh-shelf-life/mobile-validation
         run: |
           sdkmanager 'platforms;android-35' 'build-tools;34.0.0'
-          gradle --no-daemon :app:assembleDebug :app:lintDebug
-          "$ANDROID_HOME/build-tools/34.0.0/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
+          gradle --no-daemon :app:assembleRelease :app:lintRelease
           mkdir -p output
-          cp app/build/outputs/apk/debug/app-debug.apk output/xianqi-phone-validation-0.1.0.apk
-          sha256sum output/*.apk > output/SHA256SUMS.txt
+          cp app/build/outputs/apk/release/app-release-unsigned.apk output/xianqi-0.2.0-unsigned.apk
+          cp "$ANDROID_HOME/build-tools/34.0.0/lib/apksigner.jar" output/apksigner.jar
+          cd output
+          sha256sum *.apk *.jar > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: xianqi-phone-validation-0.1.0
+          name: xianqi-android-0.2.0-unsigned
           path: |
             apps/qnh-shelf-life/mobile-validation/output/*.apk
+            apps/qnh-shelf-life/mobile-validation/output/*.jar
             apps/qnh-shelf-life/mobile-validation/output/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14

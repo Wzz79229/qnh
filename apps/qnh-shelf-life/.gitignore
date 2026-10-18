@@ -11,3 +11,4 @@ test-results/
 artifacts/
 *.zip
 publish-payload.json
+.local/

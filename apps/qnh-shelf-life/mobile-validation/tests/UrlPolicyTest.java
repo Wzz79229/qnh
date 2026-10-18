@@ -23,6 +23,12 @@ public final class UrlPolicyTest {
         check(!QnhUrlPolicy.safeImage("https://img.meituan.net/image.jpg#value"));
         check(!QnhUrlPolicy.safeImage("https://u:p@img.meituan.net/image.jpg"));
         check(!QnhUrlPolicy.safeImage("http://img.meituan.net/image.jpg"));
+        check("2110000000000000001".equals(SkuPolicy.decode("SKU：2110000000000000001")));
+        check("000123".equals(SkuPolicy.decode("000123")));
+        check(SkuPolicy.decode("https://attacker.invalid/?sku=123") == null);
+        check(SkuPolicy.decode("javascript:alert(1)") == null);
+        check(SkuPolicy.decode("123 456") == null);
+        check(SkuPolicy.decode(null) == null);
         System.out.println("URL policy checks passed");
     }
 }

@@ -94,7 +94,7 @@ function eanValid(code) {
  * Conservative local OCR parser. Missing or conflicting required evidence means retake.
  * Barcode ambiguity is optional and does not prevent an otherwise complete record.
  */
-export function parsePackagingText(input, { today = todayISO() } = {}) {
+export function parsePackagingText(input, { today = todayISO(), requireName = true } = {}) {
   const result = {
     name: '', productionDate: '', shelfLife: null, shelfUnit: 'day', expiryDate: '', barcode: '',
     complete: false, issues: [], evidence: { name: [], productionDate: [], shelfLife: [], expiryDate: [], barcode: [] },
@@ -206,11 +206,11 @@ export function parsePackagingText(input, { today = todayISO() } = {}) {
   if (barcodes.size === 1) result.barcode = [...barcodes][0];
   else if (barcodes.size > 1) issue('识别到多个有效条码，未自动选择条码；商品名称和日期信息仍可使用。', false);
 
-  if (!result.name && names.size <= 1) issue('未识别到明确标注的商品名称，请拍清“产品名称”或“品名”标签。');
+  if (requireName && !result.name && names.size <= 1) issue('未识别到明确标注的商品名称，请拍清“产品名称”或“品名”标签。');
   if (!result.expiryDate && !expiry.ambiguous) {
     if (!result.productionDate && !production.ambiguous) issue('未识别到明确标注的生产日期或到期日期，请拍清日期及其标签。');
     else if (result.shelfLife === null && durations.size <= 1 && !invalidDuration) issue('未识别到明确标注的保质期，请拍清保质期数值和单位。');
   }
-  result.complete = Boolean(result.name && result.expiryDate && !blocked);
+  result.complete = Boolean((!requireName || result.name) && result.expiryDate && !blocked);
   return result;
 }

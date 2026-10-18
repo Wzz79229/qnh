@@ -2,6 +2,7 @@ package com.xianqi.phonevalidation;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -31,6 +32,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import org.json.JSONObject;
+import org.json.JSONArray;
 import org.json.JSONTokener;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -45,7 +47,17 @@ public final class MainActivity extends Activity {
     private static final String PRODUCT_URL = LOGIN_URL + "#/unifiedGoods/tenant/spu-list";
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService images = Executors.newSingleThreadExecutor();
-    private WebView web;
+    private WebView web, batchEngine;
+    private boolean batchReady = false, resumeVerified = false, restoreWorkbench = false;
+    private String batchRuntime = "", captureTenant = "", captureSku = "", pendingCapture = "", captureMode = "", productionText = "", shelfText = "";
+    private int batchGeneration = 0;
+    private JSONObject currentProduct = null, currentDates = null;
+    private DraftStore drafts;
+    private String draftId = "";
+    private LinearLayout batchPanel;
+    private TextView dateSummary, draftList;
+    private EditText quantityInput;
+    private Button draftButton;
     private TextView status, result, tenantLabel, imageStatus, address;
     private EditText skuInput;
     private Button query, returnButton;
@@ -65,7 +77,11 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         try (InputStream input = getAssets().open("qnh-phone.js")) { runtime = new String(readLimited(input, 200_000), StandardCharsets.UTF_8); }
         catch (Exception error) { showFatal("安装包缺少查询组件，请重新安装验证版。"); return; }
+        try (InputStream input = getAssets().open("batch.js")) { batchRuntime = new String(readLimited(input, 300_000), StandardCharsets.UTF_8); }
+        catch (Exception error) { showFatal("安装包缺少日期识别组件，请重新安装。"); return; }
+        drafts = new DraftStore(this);
         buildUi(); configureBrowser();
+        configureBatchEngine();
         status.setText("请在下方牵牛花官方页面登录，成功后自动进入鲜期。可双指缩放页面。");
         web.loadUrl(LOGIN_URL);
     }
@@ -83,7 +99,7 @@ public final class MainActivity extends Activity {
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             view.setPadding(dp(12), insets.getSystemWindowInsetTop(), dp(12), insets.getSystemWindowInsetBottom()); return insets;
         });
-        root.addView(label("鲜期 · 手机连接验证", 22));
+        root.addView(label("鲜期 · 保质期管理", 22));
         status = label("正在打开牵牛花…", 13); root.addView(status);
         LinearLayout tools = new LinearLayout(this);
         tools.addView(button("牵牛花页面", v -> showOfficial()), new LinearLayout.LayoutParams(0, dp(44), 1));
@@ -96,7 +112,8 @@ public final class MainActivity extends Activity {
         workbench = new ScrollView(this); workbench.setFillViewport(true);
         LinearLayout content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL); content.setPadding(dp(8), dp(16), dp(8), dp(16));
         tenantLabel = label("", 15); content.addView(tenantLabel);
-        content.addView(label("输入一个真实 SKU，验证是否能直接从本机牵牛花查回商品名称、规格和图片。", 15));
+        content.addView(button("扫描 SKU 码", v -> openCapture("sku")));
+        content.addView(label("扫描 SKU 码查询商品，也可以输入完整 SKU。", 15));
         skuInput = new EditText(this); skuInput.setHint("SKU 编码"); skuInput.setSingleLine(true);
         skuInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
         skuInput.setAutofillHints((String[]) null); content.addView(skuInput);
@@ -105,7 +122,15 @@ public final class MainActivity extends Activity {
         image = new ImageView(this); image.setScaleType(ImageView.ScaleType.FIT_CENTER); image.setContentDescription("牵牛花商品主图");
         content.addView(image, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(220))); image.setVisibility(View.GONE);
         imageStatus = label("", 13); content.addView(imageStatus);
-        content.addView(label("当前验证版只检查手机登录与商品查询。扫码、拍照识别和 GitHub 批次保存将在连接验证后接入。", 13));
+        batchPanel = new LinearLayout(this); batchPanel.setOrientation(LinearLayout.VERTICAL); batchPanel.setVisibility(View.GONE);
+        batchPanel.addView(label("当前生产批次", 19));
+        batchPanel.addView(button("拍生产日期", v -> openCapture("production")));
+        batchPanel.addView(button("拍保质期", v -> openCapture("shelf")));
+        dateSummary = label("拍清生产日期和保质期，程序自动计算到期日期。", 15); batchPanel.addView(dateSummary);
+        quantityInput = new EditText(this); quantityInput.setSingleLine(true); quantityInput.setHint("清点件数"); quantityInput.setInputType(InputType.TYPE_CLASS_NUMBER); batchPanel.addView(quantityInput);
+        draftButton = button("暂存本机批次", v -> saveDraft()); batchPanel.addView(draftButton);
+        batchPanel.addView(label("云端连接完成前，批次先加密暂存在本机。包装照片不保存、不上传。", 13)); content.addView(batchPanel);
+        content.addView(label("最近本机批次", 18)); draftList = label("", 14); content.addView(draftList);
         content.addView(button("清除本机牵牛花登录", v -> clearLogin()));
         workbench.addView(content); root.addView(workbench, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
         workbench.setVisibility(View.GONE); setContentView(root);
@@ -152,6 +177,115 @@ public final class MainActivity extends Activity {
         java.util.regex.Matcher match = java.util.regex.Pattern.compile("Chrome/([0-9.]+)").matcher(ua);
         return match.find() ? match.group(1) : "120.0.0.0";
     }
+    @SuppressLint("SetJavaScriptEnabled") private void configureBatchEngine() {
+        batchEngine = new WebView(this);
+        batchEngine.getSettings().setJavaScriptEnabled(true); batchEngine.getSettings().setBlockNetworkLoads(true);
+        batchEngine.getSettings().setAllowFileAccess(false); batchEngine.getSettings().setAllowContentAccess(false);
+        batchEngine.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        batchEngine.setWebViewClient(new WebViewClient() {
+            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) { return true; }
+            @Override public void onPageFinished(WebView view, String url) {
+                view.evaluateJavascript(batchRuntime + ";Boolean(window.__xianqiBatch);", raw -> {
+                    batchReady = "true".equals(raw);
+                    if (batchReady && (!productionText.isEmpty() || !shelfText.isEmpty())) parseDates();
+                });
+            }
+        });
+        batchEngine.loadDataWithBaseURL("https://appassets.androidplatform.net/", "<!doctype html><meta charset=utf-8><title>本机日期计算</title>", "text/html", "UTF-8", null);
+    }
+    private JSONObject evaluationObject(String raw) throws Exception {
+        if (raw == null || raw.length() > 50_000) throw new Exception();
+        Object decoded = new JSONTokener(raw).nextValue(); if (!(decoded instanceof String)) throw new Exception();
+        return new JSONObject((String) decoded);
+    }
+    private void clearBatch() {
+        batchGeneration++; currentProduct = null; currentDates = null; productionText = ""; shelfText = ""; draftId = "";
+        if (batchPanel != null) { batchPanel.setVisibility(View.GONE); dateSummary.setText("拍清生产日期和保质期，程序自动计算到期日期。"); quantityInput.setText(""); draftButton.setEnabled(true); }
+    }
+    private void openCapture(String mode) {
+        if (!loggedIn || !resumeVerified) { status.setText("正在确认牵牛花登录，请稍候。"); return; }
+        if (!"sku".equals(mode) && currentProduct == null) { status.setText("请先扫描 SKU 查回商品。"); return; }
+        captureTenant = tenantId; captureSku = currentProduct == null ? "" : currentProduct.optString("sku"); captureMode = mode; pendingCapture = "";
+        Intent request = new Intent(this, CaptureActivity.class); request.putExtra("mode", "sku".equals(mode) ? "sku" : "date");
+        startActivityForResult(request, 62);
+    }
+    @Override public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != 62) return;
+        if (resultCode != RESULT_OK || data == null) { captureMode = ""; pendingCapture = ""; return; }
+        String expectedMode = "sku".equals(captureMode) ? "sku" : "date", text = data.getStringExtra("value");
+        if (!expectedMode.equals(data.getStringExtra("mode")) || text == null || text.length() > 12000) { captureMode = ""; pendingCapture = ""; return; }
+        pendingCapture = text; resumeVerified = false; candidate = ""; confirmations = 0;
+        status.setText("识别完成，正在确认当前牵牛花租户…");
+    }
+    private void applyCapture() {
+        if (pendingCapture.isEmpty() || !resumeVerified) return;
+        String text = pendingCapture, mode = captureMode; pendingCapture = ""; captureMode = "";
+        if (!tenantId.equals(captureTenant)) { status.setText("租户已切换，本次识别结果已丢弃，请重新扫描。"); return; }
+        if ("sku".equals(mode)) {
+            String sku = SkuPolicy.decode(text); if (sku == null) { status.setText("未识别到完整 SKU，请重新扫描。"); return; }
+            skuInput.setText(sku); startQuery(); return;
+        }
+        if (currentProduct == null || !captureSku.equals(currentProduct.optString("sku"))) { status.setText("商品已变化，请为当前商品重新拍日期。"); return; }
+        if ("production".equals(mode)) productionText = text; else if ("shelf".equals(mode)) shelfText = text; else return;
+        batchGeneration++; draftId = ""; currentDates = null; showWorkbench(); parseDates();
+    }
+    private void parseDates() {
+        if (!batchReady || batchEngine == null) { status.setText("本机日期计算正在加载，请稍候。"); return; }
+        final int generation = batchGeneration; final String tenant = tenantId;
+        String text = productionText + "\n" + shelfText;
+        batchEngine.evaluateJavascript("JSON.stringify(window.__xianqiBatch.parse(" + JSONObject.quote(text) + "));", raw -> {
+            if (generation != batchGeneration || !tenant.equals(tenantId) || !loggedIn || !resumeVerified) return;
+            try {
+                currentDates = evaluationObject(raw);
+                String production = currentDates.optString("productionDate", ""), expiry = currentDates.optString("expiryDate", "");
+                int shelf = currentDates.optInt("shelfLife", 0); String unit = currentDates.optString("shelfUnit", "day");
+                String summary = "生产日期：" + (production.isEmpty() ? "未识别" : production) + "\n保质期：" + (shelf < 1 ? "未识别" : shelf + ("month".equals(unit) ? "个月" : "year".equals(unit) ? "年" : "天"))
+                    + "\n到期日期：" + (expiry.isEmpty() ? "待计算" : expiry);
+                if (!currentDates.optBoolean("complete")) {
+                    JSONArray issues = currentDates.optJSONArray("issues");
+                    if (issues != null && issues.length() > 0) summary += "\n" + issues.optString(0);
+                    status.setText("日期信息尚未完整，请按提示重新拍摄。");
+                } else { draftId = java.util.UUID.randomUUID().toString(); status.setText("日期已识别，请核对到期日期并填写清点件数。"); }
+                dateSummary.setText(summary); draftButton.setEnabled(currentDates.optBoolean("complete"));
+            } catch (Exception ignored) { status.setText("日期计算未完成，请重新拍摄。"); }
+        });
+    }
+    private void saveDraft() {
+        if (!loggedIn || !resumeVerified || currentProduct == null || currentDates == null || !currentDates.optBoolean("complete") || !batchReady) {
+            status.setText("请先查回商品并识别完整日期。"); return;
+        }
+        final int generation = batchGeneration; final String tenant = tenantId;
+        try {
+            JSONObject value = new JSONObject(); value.put("id", draftId); value.put("tenantId", tenant); value.put("product", currentProduct);
+            value.put("dates", currentDates); value.put("quantity", quantityInput.getText().toString().trim()); draftButton.setEnabled(false);
+            batchEngine.evaluateJavascript("JSON.stringify(window.__xianqiBatch.draft(" + value.toString() + "));", raw -> {
+                if (generation != batchGeneration || !tenant.equals(tenantId) || !loggedIn || !resumeVerified) return;
+                try {
+                    JSONObject response = evaluationObject(raw);
+                    if (!response.optBoolean("ok")) { status.setText(response.optString("message", "批次数据未确认，请重新核对。")); draftButton.setEnabled(true); return; }
+                    drafts.save(tenant, response.getJSONObject("draft"));
+                    batchGeneration++; productionText = ""; shelfText = ""; currentDates = null; draftId = ""; quantityInput.setText("");
+                    dateSummary.setText("已暂存当前批次。录入下一生产日期时请重新拍摄。"); draftButton.setEnabled(false);
+                    status.setText("批次已加密暂存在本机，尚未同步云端。"); refreshDrafts();
+                } catch (Exception ignored) { draftButton.setEnabled(true); status.setText("本机批次保存未完成，请保留当前信息后重试。"); }
+            });
+        } catch (Exception ignored) { status.setText("批次信息不完整，请重新核对。"); }
+    }
+    private void refreshDrafts() {
+        if (!loggedIn || !resumeVerified || drafts == null || draftList == null) return;
+        try {
+            JSONArray values = drafts.list(tenantId); StringBuilder summary = new StringBuilder();
+            for (int index = 0; index < values.length(); index++) {
+                JSONObject row = values.getJSONObject(index), product = row.getJSONObject("product");
+                if (index > 0) summary.append("\n\n");
+                summary.append(product.getString("name")).append("\nSKU：").append(product.getString("sku"))
+                    .append("\n生产：").append(row.getString("productionDate")).append(" · 到期：").append(row.getString("expiryDate"))
+                    .append("\n").append(row.getInt("quantity")).append(" 件 · 本机待同步");
+            }
+            draftList.setText(values.length() == 0 ? "当前租户暂无本机批次。" : summary.toString());
+        } catch (Exception ignored) { draftList.setText("本机批次未能读取。请保留当前 App，避免卸载导致数据丢失。"); }
+    }
     static boolean allowedTop(String value) {
         return QnhUrlPolicy.allowedTop(value);
     }
@@ -179,10 +313,13 @@ public final class MainActivity extends Activity {
         if (!observed.equals(candidate)) { candidate = observed; confirmations = 1; }
         else confirmations++;
         if (confirmations < 2) return;
+        resumeVerified = true;
         if (!tenantId.isEmpty() && !tenantId.equals(observed)) { failQuery(""); result.setText(""); image.setImageDrawable(null); image.setVisibility(View.GONE); }
         boolean entering = !loggedIn || !tenantId.equals(observed);
         tenantId = observed; loggedIn = true; returnButton.setEnabled(true); tenantLabel.setText("已登录牵牛花 · 租户 " + tenantId);
-        if (entering) { status.setText("手机端牵牛花已登录，可以验证商品查询。"); showWorkbench(); }
+        if (entering) { status.setText("牵牛花已登录，可以扫描 SKU 录入批次。"); refreshDrafts(); showWorkbench(); }
+        if (restoreWorkbench && pendingSku.isEmpty()) { restoreWorkbench = false; showWorkbench(); }
+        applyCapture();
         if (pendingSku.isEmpty()) return;
         if (!pendingTenant.equals(tenantId)) { failQuery("牵牛花租户已切换，请重新查询。"); return; }
         final int current = operation, page = navigation;
@@ -201,6 +338,8 @@ public final class MainActivity extends Activity {
     private void lock() {
         boolean previouslyLoggedIn = loggedIn;
         loggedIn = false; tenantId = ""; candidate = ""; confirmations = 0;
+        resumeVerified = false; clearBatch(); pendingCapture = ""; captureTenant = "";
+        if (draftList != null) draftList.setText("");
         if (returnButton == null) return;
         returnButton.setEnabled(false); failQuery(""); result.setText(""); image.setImageDrawable(null); image.setVisibility(View.GONE); imageStatus.setText("");
         workbench.setVisibility(View.GONE); web.setVisibility(View.VISIBLE); address.setVisibility(View.VISIBLE);
@@ -210,9 +349,10 @@ public final class MainActivity extends Activity {
     private void showWorkbench() { web.setVisibility(View.GONE); address.setVisibility(View.GONE); workbench.setVisibility(View.VISIBLE); }
     private void startQuery() {
         String sku = skuInput.getText().toString().trim();
-        if (!loggedIn) { showOfficial(); status.setText("请先登录牵牛花。"); return; }
+        if (!loggedIn || !resumeVerified) { showOfficial(); status.setText("请先完成牵牛花登录确认。"); return; }
         if (!sku.matches("[A-Za-z0-9._-]{1,64}")) { skuInput.setError("请输入完整 SKU 编码"); return; }
         operation++; pendingSku = sku; pendingTenant = tenantId; launched = false;
+        clearBatch();
         deadline = android.os.SystemClock.elapsedRealtime() + 35_000;
         query.setEnabled(false); result.setText(""); image.setVisibility(View.GONE); image.setImageDrawable(null); imageStatus.setText("");
         status.setText("正在通过手机牵牛花查询 SKU，请稍候…");
@@ -233,6 +373,7 @@ public final class MainActivity extends Activity {
         JSONObject product = state.getJSONObject("product");
         String sku = product.getString("sku"), name = product.getString("name"), spec = product.optString("spec", ""), imageUrl = product.getString("imageUrl");
         if (!sku.equals(pendingSku) || name.isEmpty() || name.length() > 200 || spec.length() > 120 || !safeImage(imageUrl)) throw new Exception();
+        currentProduct = new JSONObject(product.toString()); batchGeneration++; batchPanel.setVisibility(View.VISIBLE);
         pendingSku = ""; pendingTenant = ""; launched = false; query.setEnabled(true);
         result.setText(name + (spec.isEmpty() ? "" : "\n" + spec) + "\nSKU：" + sku);
         status.setText("已从本机牵牛花查回商品信息。"); imageStatus.setText("正在加载牵牛花商品主图…"); image.setVisibility(View.VISIBLE); showWorkbench();
@@ -277,14 +418,19 @@ public final class MainActivity extends Activity {
         status.setText("本机登录已清除，请重新登录牵牛花。");
     }
     private void showFatal(String message) { TextView text = label(message, 18); text.setPadding(dp(20), dp(40), dp(20), dp(20)); setContentView(text); }
-    @Override public void onResume() { super.onResume(); active = true; probing = false; if (web != null) { web.onResume(); handler.removeCallbacks(tick); handler.post(tick); } }
-    @Override public void onPause() { active = false; handler.removeCallbacks(tick); if (web != null) web.onPause(); super.onPause(); }
+    @Override public void onResume() {
+        super.onResume(); active = true; probing = false; resumeVerified = false; confirmations = 0; candidate = "";
+        if (web != null) { web.onResume(); if (restoreWorkbench) showOfficial(); handler.removeCallbacks(tick); handler.post(tick); }
+    }
+    @Override public void onPause() { restoreWorkbench = workbench != null && workbench.getVisibility() == View.VISIBLE; active = false; resumeVerified = false; handler.removeCallbacks(tick); if (web != null) web.onPause(); super.onPause(); }
     @Override public void onBackPressed() {
         if (web != null && web.getVisibility() == View.VISIBLE && loggedIn) showWorkbench();
         else super.onBackPressed();
     }
     @Override public void onDestroy() {
         active = false; handler.removeCallbacksAndMessages(null); images.shutdownNow();
-        if (web != null) { web.stopLoading(); web.destroy(); web = null; } super.onDestroy();
+        if (web != null) { web.stopLoading(); web.destroy(); web = null; }
+        if (batchEngine != null) { batchEngine.destroy(); batchEngine = null; } if (drafts != null) drafts.close();
+        super.onDestroy();
     }
 }
