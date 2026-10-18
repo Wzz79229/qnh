@@ -29,8 +29,8 @@ public final class InventorySearchPanel extends LinearLayout {
         void onSelected(JSONObject row);
     }
     private final Activity owner;private final Host host;private final QnhConnection qnh;
-    private NameInput name;private EditText sku,location,barcode,external;
-    private TextView status,scope;private LinearLayout results,extra,pages;private Button query,previous,next;
+    private NameInput name;
+    private TextView status,scope,detected;private LinearLayout results,pages;private Button query,previous,next;
     private JSONArray rows=new JSONArray();private String request="",displayed="";
     private int serial=0,storeDepth=0;private boolean changing=false,queued=false,busy=false,queuedStores=false,productReady=false;
     private AlertDialog stores;
@@ -48,31 +48,27 @@ public final class InventorySearchPanel extends LinearLayout {
     private EditText field(LinearLayout root,String title,String hint){TextView label=WarehouseUi.text(owner,title,12,WarehouseUi.MUTED,false);root.addView(label);WarehouseUi.space(root,6);EditText e=new EditText(owner);WarehouseUi.input(e,hint);root.addView(e);return e;}
     public InventorySearchPanel(Activity owner,Host host,Bundle state){super(owner);this.owner=owner;this.host=host;qnh=QnhConnection.get(owner);setOrientation(VERTICAL);
         LinearLayout heading=new LinearLayout(owner);heading.setGravity(Gravity.CENTER_VERTICAL);TextView title=WarehouseUi.text(owner,"查询商品",18,WarehouseUi.INK,true);heading.addView(title,new LayoutParams(0,-2,1));
-        heading.addView(WarehouseUi.button(owner,"清空",false,v->{changing=true;for(EditText e:fields())e.setText("");changing=false;cancel();host.onQueryChanged();status.setText("输入查询条件，标签将自动生成。");}));
+        heading.addView(WarehouseUi.button(owner,"清空",false,v->{changing=true;for(EditText e:fields())e.setText("");changing=false;cancel();host.onQueryChanged();detected.setText("自动识别名称、SKU、库位 · 点击更改类型");status.setText("输入查询条件，标签将自动生成。");}));
         addView(heading);WarehouseUi.space(this,12);
-        LinearLayout searchRow=new LinearLayout(owner);searchRow.setGravity(Gravity.CENTER_VERTICAL);name=new NameInput(owner);name.setThreshold(2);WarehouseUi.input(name,"商品名称 · 输入后下拉选择");LayoutParams nameSize=new LayoutParams(0,dp(46),1);nameSize.setMarginEnd(dp(8));searchRow.addView(name,nameSize);
-        query=WarehouseUi.button(owner,"查询",true,v->search());searchRow.addView(query,new LayoutParams(dp(70),dp(46)));addView(searchRow);WarehouseUi.space(this,12);
-        LinearLayout codes=new LinearLayout(owner);LinearLayout skuBox=new LinearLayout(owner);skuBox.setOrientation(VERTICAL);LinearLayout locBox=new LinearLayout(owner);locBox.setOrientation(VERTICAL);
-        sku=field(skuBox,"查询 SKU","完整 SKU");location=field(locBox,"查询库位","例如 A64-6-4");LayoutParams half=new LayoutParams(0,-2,1);half.setMarginEnd(dp(10));codes.addView(skuBox,half);codes.addView(locBox,new LayoutParams(0,-2,1));addView(codes);
-        WarehouseUi.space(this,10);LinearLayout options=new LinearLayout(owner);options.setGravity(Gravity.CENTER_VERTICAL);
-        options.addView(WarehouseUi.button(owner,"更多条件 ▾",false,v->extra.setVisibility(extra.getVisibility()==VISIBLE?GONE:VISIBLE)),new LayoutParams(0,dp(40),1));
-        View gap=new View(owner);options.addView(gap,new LayoutParams(dp(8),1));options.addView(WarehouseUi.button(owner,"门店 / 仓 ▾",false,v->openStores()),new LayoutParams(0,dp(40),1));addView(options);
-        extra=new LinearLayout(owner);extra.setOrientation(VERTICAL);WarehouseUi.space(extra,10);barcode=field(extra,"商品条码","输入包装条码");WarehouseUi.space(extra,8);external=field(extra,"外部编码","输入外部编码");extra.setVisibility(GONE);addView(extra);
-        WarehouseUi.space(this,10);scope=WarehouseUi.text(owner,"正在连接库存查询（新）…",12,WarehouseUi.MUTED,false);addView(scope);WarehouseUi.space(this,5);
-        status=WarehouseUi.text(owner,"唯一结果自动出图；多条结果请选择商品与库位。",12,WarehouseUi.MUTED,false);addView(status);
+        name=new NameInput(owner);name.setThreshold(2);WarehouseUi.input(name,"输入商品名称 / SKU / 库位");name.setTag("smart-query-input");addView(name,new LayoutParams(-1,dp(48)));WarehouseUi.space(this,8);
+        detected=WarehouseUi.text(owner,"自动识别名称、SKU、库位 · 点击更改类型",12,WarehouseUi.GREEN,false);detected.setPadding(0,dp(4),0,dp(4));detected.setOnClickListener(v->{String[] types={"自动识别","商品名称","SKU","库位","商品条码","外部编码"};new AlertDialog.Builder(owner).setTitle("查询类型").setItems(types,(dialog,index)->{String raw=name.getText().toString().trim();try{raw=SmartQuery.parse(raw).value;}catch(IllegalArgumentException ignored){}String[] prefixes={"","名称:","SKU:","库位:","条码:","外部编码:"};name.setText(prefixes[index]+raw);name.setSelection(name.length());}).show();});addView(detected);WarehouseUi.space(this,10);
+        addView(WarehouseUi.button(owner,"选择门店 / 仓 ▾",false,v->openStores()),new LayoutParams(-1,dp(40)));WarehouseUi.space(this,8);
+        scope=WarehouseUi.text(owner,"正在连接库存查询（新）…",12,WarehouseUi.MUTED,false);addView(scope);WarehouseUi.space(this,6);
+        status=WarehouseUi.text(owner,"唯一结果自动出图；多条结果请选择商品与库位。",12,WarehouseUi.MUTED,false);addView(status);WarehouseUi.space(this,12);
+        query=WarehouseUi.button(owner,"查询并生成标签",true,v->search());query.setTag("smart-query-submit");addView(query,new LayoutParams(-1,dp(46)));
         results=new LinearLayout(owner);results.setOrientation(VERTICAL);addView(results);
         pages=new LinearLayout(owner);previous=WarehouseUi.button(owner,"上一页",false,v->page(-1));next=WarehouseUi.button(owner,"下一页",false,v->page(1));previous.setEnabled(false);next.setEnabled(false);LayoutParams p=new LayoutParams(0,dp(42),1);p.setMarginEnd(dp(8));pages.addView(previous,p);pages.addView(next,new LayoutParams(0,dp(42),1));pages.setVisibility(GONE);addView(pages);
-        if(state!=null){changing=true;String[] keys={"name","sku","location","barcode","external"};EditText[] fields=fields();for(int i=0;i<keys.length;i++)fields[i].setText(state.getString("query-"+keys[i],""));changing=false;}
+        if(state!=null)name.setText(state.getString("query-text",""));
         TextWatcher watcher=new TextWatcher(){public void beforeTextChanged(CharSequence v,int start,int count,int after){}public void afterTextChanged(Editable value){}
-            public void onTextChanged(CharSequence value,int start,int before,int count){if(changing)return;cancel();host.onQueryChanged();status.setText("输入条件后查询，标签将自动生成。");if(name.hasFocus()&&name.getText().toString().trim().length()>=2)handler.postDelayed(autocomplete,650);}
+            public void onTextChanged(CharSequence value,int start,int before,int count){if(changing)return;cancel();host.onQueryChanged();status.setText("查询后自动生成标签。");try{SmartQuery parsed=SmartQuery.parse(value.toString());detected.setText("已识别为："+parsed.label+" · 点击更改类型");if(name.hasFocus()&&parsed.key.equals("name")&&parsed.value.length()>=2)handler.postDelayed(autocomplete,800);}catch(IllegalArgumentException error){detected.setText(value.length()==0?"自动识别名称、SKU、库位 · 点击更改类型":error.getMessage());}}
         };
-        for(EditText field:fields()){field.addTextChangedListener(watcher);field.setOnEditorActionListener((v,action,event)->{if(action==android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH||event!=null&&event.getAction()==android.view.KeyEvent.ACTION_DOWN&&event.getKeyCode()==android.view.KeyEvent.KEYCODE_ENTER){search();return true;}return false;});}
+        name.addTextChangedListener(watcher);name.setOnEditorActionListener((v,action,event)->{if(action==android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH||event!=null&&event.getAction()==android.view.KeyEvent.ACTION_DOWN&&event.getKeyCode()==android.view.KeyEvent.KEYCODE_ENTER){search();return true;}return false;});
         name.setOnItemClickListener((parent,view,index,id)->select(index));
     }
-    private EditText[] fields(){return new EditText[]{name,sku,location,barcode,external};}
-    private JSONObject filters(){JSONObject f=new JSONObject();try{f.put("name",name.getText().toString().trim());f.put("sku",sku.getText().toString().trim());f.put("loc",location.getText().toString().trim());f.put("barcode",barcode.getText().toString().trim());f.put("external",external.getText().toString().trim());}catch(Exception ignored){}return f;}
+    private EditText[] fields(){return new EditText[]{name};}
+    private JSONObject filters(){SmartQuery parsed=SmartQuery.parse(name.getText().toString());detected.setText("已识别为："+parsed.label+" · 点击更改类型");JSONObject f=new JSONObject();try{f.put(parsed.key,parsed.value);}catch(Exception ignored){}return f;}
     private void cancel(){serial++;request="";displayed="";queued=false;queuedStores=false;busy=false;handler.removeCallbacks(autocomplete);if(name!=null){name.dismissDropDown();name.setAdapter(new ArrayAdapter<String>(owner,R.layout.inventory_suggestion,new String[0]));}rows=new JSONArray();if(pages!=null)pages.setVisibility(GONE);if(results!=null)results.removeAllViews();if(query!=null)query.setEnabled(true);if(previous!=null)previous.setEnabled(false);if(next!=null)next.setEnabled(false);if(qnh!=null)qnh.command("window.__kuguanInventory.cancel()",null);}
-    private void search(){handler.removeCallbacks(autocomplete);if(!requireQnhAccess())return;JSONObject f=filters();boolean any=false;for(String k:new String[]{"name","sku","loc","barcode","external"})any|=!f.optString(k).isEmpty();if(!any){status.setText("请填写至少一个查询条件。");return;}
+    private void search(){handler.removeCallbacks(autocomplete);if(!requireQnhAccess())return;try{filters();}catch(IllegalArgumentException error){status.setText(error.getMessage());return;}
         cancel();host.onQueryChanged();queued=true;busy=true;query.setEnabled(false);status.setText("正在按条件查询库存…");qnh.inventory();int waiting=serial;handler.postDelayed(()->{if(queued&&serial==waiting)fail("库存页面未准备好，请检查网络和牵牛花库存查询权限后重试。");},30000);
     }
     private void runQuery(){if(!queued)return;queued=false;request=String.valueOf(++serial);String current=request;
@@ -101,7 +97,7 @@ public final class InventorySearchPanel extends LinearLayout {
         for(int i=0;i<rows.length();i++){JSONObject row=rows.optJSONObject(i);if(row==null){fail("库存记录不完整，请重试。");return;}String title=row.optString("name")+"\n"+row.optString("spec")+"\n"+row.optString("store")+" · 库位："+(row.optString("loc").isEmpty()?"未设置":row.optString("loc"));suggestions[i]=title;final int index=i;Button choice=button(title,v->select(index));LayoutParams choiceSize=new LayoutParams(-1,-2);choiceSize.topMargin=dp(8);results.addView(choice,choiceSize);}
         status.setText(rows.length()==0?"没有符合条件的库存记录，请调整名称、库位或门店范围。":"请选择需要打印的商品与库位（本页 "+rows.length()+" 条）。");
         if(rows.length()==1&&paging!=null&&!paging.optBoolean("previous")&&!paging.optBoolean("next")){results.removeAllViews();select(0);return;}
-        name.setAdapter(new ArrayAdapter<>(owner,R.layout.inventory_suggestion,suggestions));if(name.hasFocus()&&rows.length()>0)name.showDropDown();
+        name.setAdapter(new ArrayAdapter<>(owner,R.layout.inventory_suggestion,suggestions));if(name.hasFocus()&&rows.length()>0&&SmartQuery.parse(name.getText().toString()).key.equals("name"))name.showDropDown();
     }
     private void select(int index){if(!requireQnhAccess()||busy||request.isEmpty()||index<0||index>=rows.length())return;handler.removeCallbacks(autocomplete);name.dismissDropDown();InputMethodManager keyboard=(InputMethodManager)owner.getSystemService(Context.INPUT_METHOD_SERVICE);if(keyboard!=null)keyboard.hideSoftInputFromWindow(name.getWindowToken(),0);busy=true;query.setEnabled(false);String current=request;
         qnh.command("window.__kuguanInventory.select("+JSONObject.quote(current)+","+index+","+JSONObject.quote(qnh.tenant())+")",ok->{if(current.equals(request)&&!Boolean.TRUE.equals(ok))fail("库存结果已经变化，请重新查询后选择。");});
@@ -125,5 +121,5 @@ public final class InventorySearchPanel extends LinearLayout {
     });}
     public void paused(){cancel();name.dismissDropDown();if(stores!=null){stores.dismiss();stores=null;}qnh.watchInventory(false);}
     public void destroy(){handler.removeCallbacksAndMessages(null);if(stores!=null)stores.dismiss();}
-    public void saveState(Bundle out){String[] keys={"name","sku","location","barcode","external"};EditText[] fields=fields();for(int i=0;i<keys.length;i++)out.putString("query-"+keys[i],fields[i].getText().toString());}
+    public void saveState(Bundle out){out.putString("query-text",name.getText().toString());}
 }

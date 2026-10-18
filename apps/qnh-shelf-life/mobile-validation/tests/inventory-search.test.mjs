@@ -26,10 +26,10 @@ function harness(t){
  const saved=['location','HTMLInputElement'].map(k=>Object.getOwnPropertyDescriptor(globalThis,k));t.after(()=>['location','HTMLInputElement'].forEach((k,i)=>saved[i]?Object.defineProperty(globalThis,k,saved[i]):delete globalThis[k]));
  class Input{get value(){return this.current||'';}set value(value){this.current=value;}dispatchEvent(){}}
  globalThis.HTMLInputElement=Input;globalThis.location={href:INVENTORY_URL};
- const state={tenant:'777',loggedIn:true,rows:[row],card:null,updated:true},waiters=[];
+ const state={tenant:'777',loggedIn:true,rows:[row],card:null,updated:true,requiresLogin:false},waiters=[];
  const inputs=Object.fromEntries(['name','sku','barcode','external'].map(k=>[k,new Input()])),locations=Array.from({length:4},()=>new Input());
  const control={inputs,locations,root:{querySelector:()=>null},button:{click(){if(state.updated)location.href=receipt(normalizeInventoryFilters({...Object.fromEntries(Object.entries(inputs).map(([k,v])=>[k,v.value])),loc:locations.map(v=>v.value).join('-').replace(/-+$/u,'')}));}}};
- const runtime=createInventorySearch({shell:()=>state.loggedIn,tenant:()=>state.tenant,controls:()=>control,observe:()=>{let resolve;const promise=new Promise(r=>resolve=r);const watcher={promise,resolve,cancel:()=>resolve(false)};waiters.push(watcher);return watcher;},readRows:()=>state.rows.map(data=>({data,link:{click(){location.href=flow();}}})),readCard:()=>state.card});
+ const runtime=createInventorySearch({shell:()=>state.loggedIn,tenant:()=>state.tenant,requiresLogin:()=>state.requiresLogin,controls:()=>control,observe:()=>{let resolve;const promise=new Promise(r=>resolve=r);const watcher={promise,resolve,cancel:()=>resolve(false)};waiters.push(watcher);return watcher;},readRows:()=>state.rows.map(data=>({data,link:{click(){location.href=flow();}}})),readCard:()=>state.card});
  return {runtime,state,control,waiters,settle:()=>new Promise(r=>setImmediate(r))};
 }
 test('name/location search returns choices and resolves the selected full SKU before returning data',async t=>{
@@ -50,4 +50,13 @@ test('lightweight idle checks still detect logout without reading inventory cont
  const h=harness(t);h.control.root.querySelector=()=>{throw Error('Heavy inventory read');};
  assert.equal(h.runtime.inspect(false).authorized,true);assert.equal(h.runtime.inspect(false).productReady,false);
  h.state.loggedIn=false;assert.equal(h.runtime.inspect(false).authorized,false);assert.equal(h.runtime.inspect(false).tenantId,'');
+});
+test('a temporary shell gap while opening flow does not lose the selected row or expose unverified data',async t=>{
+ const h=harness(t);h.runtime.search('1',filters,'777');h.waiters[0].resolve(true);await h.settle();h.runtime.select('1',0,'777');
+ h.state.loggedIn=false;const checking=h.runtime.inspect();assert.equal(checking.authorized,false);assert.equal(checking.authState,'checking');assert.equal(checking.row,undefined);assert.equal(checking.rows,undefined);
+ h.state.loggedIn=true;h.state.card={name:row.name,sku:SKU};assert.equal(h.runtime.inspect().status,'selected');assert.equal(h.runtime.inspect().row.sku,SKU);
+});
+test('an explicit login page discards the selected row rather than restoring it after login',async t=>{
+ const h=harness(t);h.runtime.search('1',filters,'777');h.waiters[0].resolve(true);await h.settle();h.runtime.select('1',0,'777');h.state.loggedIn=false;h.state.requiresLogin=true;assert.equal(h.runtime.inspect().authState,'login_required');
+ h.state.loggedIn=true;h.state.card={name:row.name,sku:SKU};assert.equal(h.runtime.inspect().status,'idle');assert.equal(h.runtime.inspect().row,undefined);
 });

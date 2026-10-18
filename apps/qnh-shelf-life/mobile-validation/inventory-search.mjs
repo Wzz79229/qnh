@@ -53,13 +53,19 @@ export function flowSkuReceipt(href,card,selected,expectedSku=''){
   }catch{return '';}
 }
 function readFlowCard(){
-  const cards=Array.from(document.querySelectorAll('.wms-wand-goods-info')).filter(visible);if(cards.length!==1)return null;const card=cards[0],name=card.querySelector('.wms-wand-goods-info-goods-name-text')?.innerText.trim();
-  const ids=Array.from(card.querySelectorAll('.wms-wand-goods-info-rest-info-non-tooltip')).map(e=>/^SKU[：:]\s*([A-Za-z0-9._-]{1,64})\s*$/u.exec(e.innerText.trim())?.[1]).filter(Boolean);return name&&ids.length===1?{name,sku:ids[0]}:null;
+  const cards=Array.from(document.querySelectorAll('.wms-wand-goods-info')).filter(visible).map(card=>{
+    const name=card.querySelector('.wms-wand-goods-info-goods-name-text')?.innerText.trim();
+    const ids=Array.from(card.querySelectorAll('.wms-wand-goods-info-rest-info-non-tooltip')).map(e=>/^SKU[：:]\s*([A-Za-z0-9._-]{1,64})\s*$/u.exec(e.innerText.trim())?.[1]).filter(Boolean);
+    return name&&ids.length===1?{name,sku:ids[0]}:null;
+  }).filter(Boolean);return cards.length===1?cards[0]:null;
+}
+export function loginRequired(){
+  try{const u=new URL(location.href);return u.origin!=='https://qnh.meituan.com'||!['/','/home.html'].includes(u.pathname)||/^#\/(?:login|logout)(?:\/|\?|$)/iu.test(u.hash)||Array.from(document.querySelectorAll('input[type="password"]')).some(visible);}catch{return true;}
 }
 function setInput(input,value){const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')?.set;if(!setter)throw Error('INPUT');setter.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));}
 function storeToggle(){return searchControls()?.root.querySelector('.wms-roo-wand-storepicker-bizqnh-multi-cascader-picker .wms-roo-multi-cascader-toggle');}
 function storeColumns(){return Array.from(document.querySelectorAll('.wms-roo-wand-storepicker-bizqnh-multi-cascader-picker-dropdown .wms-roo-picker-cascader-menu-column')).filter(visible);}
-export function createInventorySearch({shell=readLoggedInQnhShell,tenant=readObservedQnhTenantId,controls=searchControls,observe=observeInventory,readRows=readSearchRows,readCard=readFlowCard,now=()=>Date.now()}={}){
+export function createInventorySearch({shell=readLoggedInQnhShell,tenant=readObservedQnhTenantId,controls=searchControls,observe=observeInventory,readRows=readSearchRows,readCard=readFlowCard,requiresLogin=loginRequired,now=()=>Date.now()}={}){
   let state={status:'idle'},generation=0,watcher=null,receipt='',selected=null;
   const identity=()=>{try{const u=new URL(location.href),id=tenant();return u.origin==='https://qnh.meituan.com'&&['/','/home.html'].includes(u.pathname)&&shell()&&typeof id==='string'&&/^[1-9][0-9]{0,19}$/u.test(id)?id:'';}catch{return '';}};
   const cancel=()=>{generation++;watcher?.cancel();watcher=null;state={status:'idle'};receipt='';selected=null;};
@@ -71,15 +77,19 @@ export function createInventorySearch({shell=readLoggedInQnhShell,tenant=readObs
       if(page===1&&newStamp){for(const key of Object.keys(fields))setInput(control.inputs[key],filters[key]);for(let i=0;i<4;i++)setInput(control.locations[i],filters.loc.split('-')[i]||'');}
       if(!sameInputs(control,filters))throw Error('INPUT');watcher=observe(control);const active=watcher;click(control);
       const fresh=await active.promise;if(current!==generation)return;watcher=null;
-      if(!fresh||!matches(scope)||!sameInputs(control,filters)||!inventoryFilterReceipt(location.href,filters,page,stamp,newStamp))throw Error('STALE');
-      const rows=readRows(control).map(row=>row.data);receipt=location.href;state={...state,status:rows.length?'found':'not_found',rows,pagination:pagination(control)};
+      // A route can redraw the tenant header briefly. No data is returned until it is verified again.
+      for(let attempt=0;fresh&&!identity()&&!requiresLogin()&&current===generation&&attempt<20;attempt++)await new Promise(resolve=>setTimeout(resolve,150));
+      if(current!==generation)return;const currentControl=controls();
+      if(!fresh||!matches(scope)||!currentControl||!sameInputs(currentControl,filters)||!inventoryFilterReceipt(location.href,filters,page,stamp,newStamp))throw Error('STALE');
+      const rows=readRows(currentControl).map(row=>row.data);receipt=location.href;state={...state,status:rows.length?'found':'not_found',rows,pagination:pagination(currentControl)};
     }catch{if(current===generation)state={status:'error',requestId:String(requestId),tenantId:scope};}})();return true;
   }
   return Object.freeze({version:2,cancel,
-    inspect(details=true){const id=identity();if(!id||state.tenantId&&state.tenantId!==id)cancel();
+    inspect(details=true){const id=identity();if(!id){const required=requiresLogin();if(required)cancel();return {authorized:false,authState:required?'login_required':'checking',tenantId:'',productReady:false,status:'checking'};}
+      if(state.tenantId&&state.tenantId!==id)cancel();
       if(state.status==='resolving'&&selected){const sku=flowSkuReceipt(location.href,readCard(),selected.data,state.filters.sku);if(sku)state={...state,status:'selected',row:{...selected.data,sku}};else if(now()>selected.deadline)state={...state,status:'error'};}
       const control=details&&id&&inventoryPage(location.href)?controls():null;
-      return {...state,authorized:Boolean(id),tenantId:id,productReady:Boolean(id&&control),store:control?.root.querySelector('.wms-roo-picker-value-list')?.innerText.trim()||''};
+      return {...state,authorized:true,authState:'authenticated',tenantId:id,productReady:Boolean(control),store:control?.root.querySelector('.wms-roo-picker-value-list')?.innerText.trim()||''};
     },
     search(requestId,raw,scope){let filters;try{filters=normalizeInventoryFilters(raw);}catch{return false;}return execute(requestId,filters,scope,1,c=>c.button.click(),true);},
     page(requestId,direction,scope){if(state.status!=='found'&&state.status!=='not_found'||![-1,1].includes(direction)||!matches(scope)||location.href!==receipt)return false;

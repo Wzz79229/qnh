@@ -43,7 +43,7 @@ public final class QnhConnection {
     private Activity owner;
     private String runtime="",lastInventory=INVENTORY;
     private int navigation=0;
-    private boolean active=false,ready=false,probing=false,loaded=false,injected=false,loginVisible=false,inventoryInterest=false,pending=false;
+    private boolean active=false,ready=false,probing=false,loaded=false,injected=false,loginVisible=false,inventoryInterest=false,pending=false,loginRequired=false;
     private long burstUntil=0;
     private final Runnable release=()->releaseBrowser();
     private final Runnable tick=new Runnable(){public void run(){if(!active)return;probe();handler.postDelayed(this,QnhPolling.interval(loginVisible||!gate.verified(),inventoryInterest,pending||SystemClock.elapsedRealtime()<burstUntil));}};
@@ -60,29 +60,35 @@ public final class QnhConnection {
         web.setWebChromeClient(new WebChromeClient(){@Override public void onPermissionRequest(PermissionRequest request){request.deny();}});
         web.setWebViewClient(new WebViewClient(){
             @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request){if(!request.isForMainFrame())return false;boolean allowed=QnhUrlPolicy.allowedTop(request.getUrl().toString());if(!allowed)message("已停止打开官方登录站点以外的地址。");return !allowed;}
-            @Override public void onPageStarted(WebView view,String url,Bitmap icon){if(view!=web)return;navigation++;ready=false;probing=false;injected=false;if(!QnhUrlPolicy.qnhOrigin(url)){gate.clear();notifyLocked();}}
+            @Override public void onPageStarted(WebView view,String url,Bitmap icon){if(view!=web)return;navigation++;ready=false;probing=false;injected=false;if(!QnhUrlPolicy.qnhOrigin(url)){gate.clear();loginRequired=true;notifyLocked();}}
             @Override public void onPageFinished(WebView view,String url){if(view!=web)return;ready=true;probing=false;kick();}
             @Override public void onReceivedSslError(WebView view,SslErrorHandler ssl,SslError error){ssl.cancel();if(view!=web)return;gate.clear();ready=false;notifyLocked();message("网站证书校验失败，请检查手机时间和网络。");}
             @Override public void onReceivedError(WebView view,WebResourceRequest request,WebResourceError error){if(view==web&&request.isForMainFrame()){gate.clear();ready=false;notifyLocked();message("牵牛花页面加载失败，请检查网络后重新加载。");}}
         });
     }
     public boolean verified(){return gate.verified();}
+    public boolean requiresLogin(){return loginRequired;}
+    public void retryVerification(){kick();}
     public String tenant(){return gate.tenant();}
     public void listen(Listener value){listener=value;}
     public void unlisten(Listener value){if(listener==value)listener=null;}
     public void attach(Activity activity,FrameLayout host,boolean visible){context.setBaseContext(activity);ensureBrowser();if(web.getParent() instanceof ViewGroup)((ViewGroup)web.getParent()).removeView(web);
         owner=activity;loginVisible=visible;if(visible)inventoryInterest=false;
-        web.getSettings().setLoadsImagesAutomatically(visible);web.getSettings().setBlockNetworkImage(!visible);web.setVisibility(visible?View.VISIBLE:View.INVISIBLE);host.addView(web,0,new FrameLayout.LayoutParams(-1,-1));web.resumeTimers();web.onResume();kick();
+        web.getSettings().setLoadsImagesAutomatically(visible);web.getSettings().setBlockNetworkImage(!visible);
+        // Keep the SPA rendering: INVISIBLE can suspend its animation-frame updates.
+        // Feature screens have a full opaque native view above this browser at index zero.
+        web.setVisibility(View.VISIBLE);web.setFocusable(visible);web.setFocusableInTouchMode(visible);web.setImportantForAccessibility(visible?View.IMPORTANT_FOR_ACCESSIBILITY_AUTO:View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        host.addView(web,0,new FrameLayout.LayoutParams(-1,-1));web.resumeTimers();web.onResume();kick();
     }
     public void releaseHost(Activity activity){if(owner==activity){if(web!=null&&web.getParent() instanceof ViewGroup)((ViewGroup)web.getParent()).removeView(web);owner=null;context.setBaseContext(app);}}
     public void foreground(boolean value){active=value;handler.removeCallbacks(tick);handler.removeCallbacks(release);
         if(value){if(web!=null){web.resumeTimers();web.onResume();}kick();}
-        else{gate.clear();navigation++;probing=false;pending=false;if(web!=null){web.onPause();web.pauseTimers();}handler.postDelayed(release,60000);}
+        else{gate.clear();loginRequired=false;navigation++;probing=false;pending=false;if(web!=null){web.onPause();web.pauseTimers();}handler.postDelayed(release,60000);}
     }
     public void trimMemory(int level){if(!active&&(level==ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW||level==ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL||level>=ComponentCallbacks2.TRIM_MEMORY_BACKGROUND))releaseBrowser();}
     private void releaseBrowser(){if(active||web==null)return;WebView old=web;web=null;navigation++;ready=false;loaded=false;injected=false;probing=false;gate.clear();if(old.getParent() instanceof ViewGroup)((ViewGroup)old.getParent()).removeView(old);old.stopLoading();old.destroy();owner=null;context.setBaseContext(app);}
     public void freshLogin(){ensureBrowser();gate.clear();ready=false;probing=false;loaded=true;injected=false;lastInventory=INVENTORY;web.loadUrl(INVENTORY);kick();}
-    public void signOut(Runnable done){gate.clear();ready=false;navigation++;probing=false;lastInventory=INVENTORY;if(web!=null)web.stopLoading();CookieManager.getInstance().removeAllCookies(ignored->{CookieManager.getInstance().flush();android.webkit.WebStorage.getInstance().deleteAllData();done.run();});}
+    public void signOut(Runnable done){gate.clear();loginRequired=true;ready=false;navigation++;probing=false;lastInventory=INVENTORY;if(web!=null)web.stopLoading();CookieManager.getInstance().removeAllCookies(ignored->{CookieManager.getInstance().flush();android.webkit.WebStorage.getInstance().deleteAllData();done.run();});}
     public void inventory(){ensureBrowser();if(!loaded||!isInventory()){loaded=true;web.loadUrl(lastInventory);}kick();}
     public boolean isInventory(){return web!=null&&isInventoryUrl(web.getUrl());}
     private static boolean isInventoryUrl(String value){try{android.net.Uri uri=android.net.Uri.parse(value);String fragment=uri.getFragment();return QnhUrlPolicy.qnhOrigin(value)&&fragment!=null&&fragment.startsWith("/co-wms/inventory-query-integration/list?")&&("&"+fragment.substring(fragment.indexOf('?')+1)+"&").contains("&tab=goodsBatch&");}catch(Exception ignored){return false;}}
@@ -97,7 +103,7 @@ public final class QnhConnection {
     private static Object decode(String raw){try{if(raw==null||raw.length()>180000)return null;Object outer=new org.json.JSONTokener(raw).nextValue();return outer instanceof String?new org.json.JSONTokener((String)outer).nextValue():null;}catch(Exception ignored){return null;}}
     private void probe(){if(!active||!ready||probing||web==null||!QnhUrlPolicy.qnhOrigin(web.getUrl())||runtime.isEmpty())return;probing=true;int page=navigation;boolean details=inventoryInterest&&!loginVisible;
         web.evaluateJavascript(prefix()+"JSON.stringify(window.__kuguanInventory.inspect("+details+"));",raw->{if(page!=navigation||!active)return;probing=false;Object value=decode(raw);if(!(value instanceof JSONObject)){gate.clear();notifyLocked();return;}
-            injected=true;JSONObject snapshot=(JSONObject)value;gate.observe(snapshot.optBoolean("authorized"),snapshot.optString("tenantId"));String phase=snapshot.optString("status");pending="pending".equals(phase)||"resolving".equals(phase);
+            injected=true;JSONObject snapshot=(JSONObject)value;loginRequired="login_required".equals(snapshot.optString("authState"));gate.observe(snapshot.optBoolean("authorized"),snapshot.optString("tenantId"));String phase=snapshot.optString("status");pending="pending".equals(phase)||"resolving".equals(phase);
             if(gate.verified()&&isInventory())lastInventory=web.getUrl();if(listener!=null)listener.onQnhSnapshot(snapshot);
         });
     }
