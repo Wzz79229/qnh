@@ -100,7 +100,7 @@ public final class InventoryLookupActivity extends QnhProtectedActivity {
         handler.postDelayed(()->{if(current.equals(request)&&busy)fail("翻页超时，请重新查询。");},20000);
     }
     private void openStores(){if(!requireQnhAccess())return;cancel();storeDepth=0;if(!productReady||!qnh.isInventory()){queuedStores=true;status.setText("正在加载可选门店 / 仓…");qnh.inventory();int waiting=serial;handler.postDelayed(()->{if(queuedStores&&serial==waiting)fail("门店列表加载超时，请检查网络和库存权限。");},20000);return;}qnh.command("window.__kuguanInventory.openStores()",ok->{if(Boolean.TRUE.equals(ok))loadStores(0);else status.setText("门店选项尚未准备好，请稍后重试。");});}
-    private void loadStores(int attempt){if(isFinishing())return;qnh.command("window.__kuguanInventory.stores()",result->{if(!(result instanceof JSONArray)){status.setText("门店列表暂时不可用。");return;}JSONArray columns=(JSONArray)result;
+    private void loadStores(int attempt){if(isFinishing()||!isQnhScreenActive())return;int ticket=serial;qnh.command("window.__kuguanInventory.stores()",result->{if(ticket!=serial||!isQnhScreenActive())return;if(!(result instanceof JSONArray)){status.setText("门店列表暂时不可用。");return;}JSONArray columns=(JSONArray)result;
         if(columns.length()<=storeDepth){if(attempt<15){handler.postDelayed(()->loadStores(attempt+1),400);return;}storeDepth=Math.max(0,columns.length()-1);}
         JSONObject column=columns.optJSONObject(storeDepth);JSONArray options=column==null?null:column.optJSONArray("options");if(options==null||options.length()==0){status.setText("暂无可选门店，请确认牵牛花库存权限。");return;}
         String[] labels=new String[options.length()];for(int i=0;i<options.length();i++){JSONObject item=options.optJSONObject(i);labels[i]=item.optString("label")+(item.optBoolean("children")?"  ›":item.optBoolean("checked")?"  ✓":"");}
@@ -111,7 +111,7 @@ public final class InventoryLookupActivity extends QnhProtectedActivity {
         builder.setNeutralButton("更多选项",(dialog,which)->qnh.command("window.__kuguanInventory.scrollStores("+storeDepth+",1)",ok->loadStores(0)));
         stores=builder.create();stores.setOnCancelListener(dialog->qnh.command("window.__kuguanInventory.closeStores()",null));stores.show();
     });}
-    @Override public void onPause(){handler.removeCallbacks(autocomplete);super.onPause();}
+    @Override public void onPause(){handler.removeCallbacks(autocomplete);name.dismissDropDown();if(stores!=null){stores.dismiss();stores=null;}super.onPause();}
     @Override public void onDestroy(){handler.removeCallbacksAndMessages(null);if(stores!=null)stores.dismiss();super.onDestroy();}
     @Override protected void onSaveInstanceState(Bundle out){String[] keys={"name","sku","location","barcode","external"};EditText[] fields=fields();for(int i=0;i<keys.length;i++)out.putString(keys[i],fields[i].getText().toString());super.onSaveInstanceState(out);}
 }

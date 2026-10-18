@@ -18,6 +18,7 @@ public abstract class QnhProtectedActivity extends Activity implements QnhConnec
     protected final boolean requireQnhAccess(){
         if(qnh==null)qnh=QnhConnection.get(this);
         if(!qnh.verified()){
+            if(!loginPending)onSessionUnavailable();
             getWindow().getDecorView().setVisibility(View.INVISIBLE);
             if(resumed&&!loginPending){loginPending=true;startActivityForResult(new Intent(this,QnhLoginActivity.class),LOGIN);}
             return false;
@@ -26,8 +27,9 @@ public abstract class QnhProtectedActivity extends Activity implements QnhConnec
         getWindow().getDecorView().setVisibility(View.VISIBLE);return true;
     }
     protected void onAuthenticated(){}
+    protected final boolean isQnhScreenActive(){return resumed&&!loginPending&&qnh!=null&&qnh.verified();}
     protected void onTenantChanged(){}
-    @Override public void onQnhSnapshot(JSONObject value){if(!resumed)return;if(!qnh.verified()){onSessionUnavailable();requireQnhAccess();}else onAuthenticatedSnapshot(value);}
+    @Override public void onQnhSnapshot(JSONObject value){if(!resumed)return;if(!qnh.verified())requireQnhAccess();else onAuthenticatedSnapshot(value);}
     protected void onAuthenticatedSnapshot(JSONObject value){}
     protected void onSessionUnavailable(){}
     @Override public void onQnhMessage(String message){}
