@@ -62,7 +62,7 @@ export function observeInventory(control) {
     const relevant = records.some(r => { const e = r.target.nodeType === 1 ? r.target : r.target.parentElement;
       return e && (e.closest('tbody') || e.tagName === 'TABLE' || /spin|loading|empty/u.test((r.oldValue || '') + ' ' + (e.getAttribute('class') || ''))
         || [...r.addedNodes, ...r.removedNodes].some(n => n.nodeType === 1 && (n.matches('table,tbody') || /spin|loading|empty/u.test(n.className || '') || n.querySelector('table,tbody')))); });
-    if (!relevant) return; clearTimeout(quiet); if (!loading()) quiet = setTimeout(() => done(!loading()), 650);
+    if (!relevant) return; clearTimeout(quiet); if (!loading()) quiet = setTimeout(() => done(!loading()), 350);
   });
   observer.observe(control.root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true });
   timer = setTimeout(() => done(false), 15000); return { promise, cancel: () => done(false) };

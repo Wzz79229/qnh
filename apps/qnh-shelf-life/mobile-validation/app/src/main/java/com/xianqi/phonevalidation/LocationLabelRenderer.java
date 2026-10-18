@@ -37,18 +37,16 @@ final class LocationLabelRenderer {
     static Bitmap render(LabelContent data) {
         float left=mm(2.5f), width=WIDTH-left*2, gap=mm(1), barcodeWidth=mm(52), barcodeHeight=mm(8);
         Paint namePaint=paint(11,false), specPaint=paint(15,false), skuPaint=paint(18,false);
-        List<String> names=wrap(data.name,namePaint,width), specs=new ArrayList<>();
-        String[] parts=("规格："+data.spec).split("\n",-1); java.util.Collections.addAll(specs,parts);
-        for(String line:specs) if(width/Math.max(1,specPaint.measureText(line))<.6f) throw new IllegalArgumentException("规格过长，请在规格中添加换行后重新生成。");
+        List<String> names=wrap(data.name,namePaint,width), specs=wrap("规格："+data.spec,specPaint,width);
         float nameLine=pt(11)+mm(2), specLine=pt(15)+mm(2), padding=mm(4), locSize=54;
         float fixed=names.size()*nameLine+specs.size()*specLine+barcodeHeight+gap*(specs.isEmpty()?2:3);
         if(fixed+pt(locSize)+padding*2>HEIGHT) padding=mm(2.5f);
         Paint locPaint=paint(locSize,true);
         while(locSize>16 && (locPaint.measureText(data.location)>width || fixed+pt(locSize)+padding*2>HEIGHT)) { locSize-=.5f; locPaint.setTextSize(pt(locSize)); }
-        if(locPaint.measureText(data.location)>width || fixed+pt(locSize)+padding*2>HEIGHT) throw new IllegalArgumentException("标签内容超过 80×60 毫米，请精简商品名称、规格或库位后重新生成。");
+        if(locPaint.measureText(data.location)>width || fixed+pt(locSize)+padding*2>HEIGHT) throw new IllegalArgumentException("商品资料超过标签可容纳范围，请在牵牛花维护资料后重新查询。");
         float skuWidth=width-barcodeWidth-gap, skuScale=Math.min(1,skuWidth/skuPaint.measureText(data.skuCaption()));
         if(skuScale<.6f) throw new IllegalArgumentException("SKU 文字无法清晰排入标签，请核对编码。");
-        Bitmap bitmap=Bitmap.createBitmap(WIDTH,HEIGHT,Bitmap.Config.ARGB_8888); bitmap.setDensity(DPI); Canvas c=new Canvas(bitmap); c.drawColor(Color.WHITE);
+        Bitmap bitmap=Bitmap.createBitmap(WIDTH,HEIGHT,Bitmap.Config.RGB_565); bitmap.setDensity(DPI); Canvas c=new Canvas(bitmap); c.drawColor(Color.WHITE);
         float y=(HEIGHT-fixed-pt(locSize))/2;
         for(int i=0;i<names.size();i++) { String line=names.get(i);
             center(c,line,left,y,width,nameLine,namePaint,false); y+=nameLine;
@@ -61,9 +59,9 @@ final class LocationLabelRenderer {
         Paint bars=new Paint(); bars.setColor(Color.BLACK); int top=Math.round(y),bottom=Math.round(y+barcodeHeight);
         for(int index=0;index<bits.length;index++) if(bits[index]) c.drawRect(Math.round(barcodeLeft+index*module),top,Math.round(barcodeLeft+(index+1)*module),bottom,bars);
         y+=barcodeHeight+gap; center(c,data.location,left,y,width,pt(locSize),locPaint,false);
-        int[] pixels=new int[WIDTH*HEIGHT]; bitmap.getPixels(pixels,0,WIDTH,0,0,WIDTH,HEIGHT);
-        for(int i=0;i<pixels.length;i++) pixels[i]=Color.red(pixels[i])<128?Color.BLACK:Color.WHITE;
-        bitmap.setPixels(pixels,0,WIDTH,0,0,WIDTH,HEIGHT); return bitmap;
+        int[] pixels=new int[WIDTH];
+        for(int row=0;row<HEIGHT;row++){bitmap.getPixels(pixels,0,WIDTH,0,row,WIDTH,1);for(int i=0;i<WIDTH;i++)pixels[i]=Color.red(pixels[i])<128?Color.BLACK:Color.WHITE;bitmap.setPixels(pixels,0,WIDTH,0,row,WIDTH,1);}
+        return bitmap;
     }
     static byte[] png(Bitmap bitmap) throws Exception {
         ByteArrayOutputStream raw=new ByteArrayOutputStream(); if(!bitmap.compress(Bitmap.CompressFormat.PNG,100,raw)) throw new Exception();

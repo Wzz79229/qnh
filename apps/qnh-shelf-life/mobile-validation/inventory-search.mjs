@@ -76,9 +76,9 @@ export function createInventorySearch({shell=readLoggedInQnhShell,tenant=readObs
     }catch{if(current===generation)state={status:'error',requestId:String(requestId),tenantId:scope};}})();return true;
   }
   return Object.freeze({version:2,cancel,
-    inspect(){const id=identity();if(!id||state.tenantId&&state.tenantId!==id)cancel();
+    inspect(details=true){const id=identity();if(!id||state.tenantId&&state.tenantId!==id)cancel();
       if(state.status==='resolving'&&selected){const sku=flowSkuReceipt(location.href,readCard(),selected.data,state.filters.sku);if(sku)state={...state,status:'selected',row:{...selected.data,sku}};else if(now()>selected.deadline)state={...state,status:'error'};}
-      const control=id&&inventoryPage(location.href)?controls():null;
+      const control=details&&id&&inventoryPage(location.href)?controls():null;
       return {...state,authorized:Boolean(id),tenantId:id,productReady:Boolean(id&&control),store:control?.root.querySelector('.wms-roo-picker-value-list')?.innerText.trim()||''};
     },
     search(requestId,raw,scope){let filters;try{filters=normalizeInventoryFilters(raw);}catch{return false;}return execute(requestId,filters,scope,1,c=>c.button.click(),true);},

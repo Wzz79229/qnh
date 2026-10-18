@@ -66,16 +66,95 @@ jobs:
           javac -cp "$core_jar" -d build/label-png-check tests/LabelPngTest.java
           java -Djava.awt.headless=true -cp "$core_jar:build/label-png-check" com.xianqi.phonevalidation.LabelPngTest app/src/test/resources/label-example.png
           mkdir -p output
-          cp app/build/outputs/apk/release/app-release-unsigned.apk output/kuguan-0.4.0-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk output/kuguan-0.5.0-unsigned.apk
           cp "$ANDROID_HOME/build-tools/34.0.0/lib/apksigner.jar" output/apksigner.jar
           cd output
           sha256sum *.apk *.jar > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: kuguan-android-0.4.0-unsigned
+          name: kuguan-android-0.5.0-unsigned
           path: |
             apps/qnh-shelf-life/mobile-validation/output/*.apk
             apps/qnh-shelf-life/mobile-validation/output/*.jar
             apps/qnh-shelf-life/mobile-validation/output/SHA256SUMS.txt
           if-no-files-found: error
+          retention-days: 14
+
+  native-ui:
+    needs: apk
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/qnh-shelf-life
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/qnh-shelf-life/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          cmdline-tools-version: '12266719'
+          packages: ''
+          log-accepted-android-sdk-licenses: false
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build native verification app
+        run: |
+          npm ci --ignore-scripts
+          node mobile-validation/build-runtime.mjs
+          sdkmanager 'platforms;android-35' 'build-tools;34.0.0' 'emulator' 'system-images;android-35;google_apis;x86_64'
+          cd mobile-validation
+          gradle --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Verify native rendering and responsive screen
+        working-directory: apps/qnh-shelf-life/mobile-validation
+        run: |
+          set -euo pipefail
+          sudo chmod a+rw /dev/kvm
+          echo no | avdmanager create avd --force --name kuguan-qa --package 'system-images;android-35;google_apis;x86_64' --device pixel_6
+          "$ANDROID_HOME/emulator/emulator" @kuguan-qa -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048 > build/emulator.log 2>&1 &
+          adb wait-for-device
+          for attempt in $(seq 1 120); do
+            if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; then break; fi
+            sleep 2
+          done
+          test "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1"
+          adb shell input keyevent 82
+          adb shell settings put global window_animation_scale 0
+          adb shell settings put global transition_animation_scale 0
+          adb shell settings put global animator_duration_scale 0
+          adb install -r app/build/outputs/apk/debug/app-debug.apk
+          adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          mkdir -p output/native-qa
+          adb shell am instrument -w com.xianqi.phonevalidation.test/com.xianqi.phonevalidation.LabelInstrumentation | tee output/native-qa/portrait.log
+          python -c "from pathlib import Path; assert 'CHECKS PASSED' in Path('output/native-qa/portrait.log').read_text()"
+          for file in label-native.png workspace-query.png workspace-label.png; do
+            adb exec-out run-as com.xianqi.phonevalidation cat "files/$file" > "output/native-qa/$file"
+          done
+          adb shell wm size 1920x1200
+          adb shell wm density 240
+          adb shell am instrument -w -e wide true com.xianqi.phonevalidation.test/com.xianqi.phonevalidation.LabelInstrumentation | tee output/native-qa/wide.log
+          python -c "from pathlib import Path; assert 'CHECKS PASSED' in Path('output/native-qa/wide.log').read_text()"
+          adb exec-out run-as com.xianqi.phonevalidation cat files/workspace-wide.png > output/native-qa/workspace-wide.png
+          core_jar=$(find "$HOME/.gradle/caches/modules-2/files-2.1/com.google.zxing/core/3.5.3" -name 'core-3.5.3.jar' -print -quit)
+          mkdir -p build/native-png-check
+          javac -cp "$core_jar" -d build/native-png-check tests/LabelPngTest.java
+          java -Djava.awt.headless=true -cp "$core_jar:build/native-png-check" com.xianqi.phonevalidation.LabelPngTest output/native-qa/label-native.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kuguan-native-ui-0.5.0
+          path: |
+            apps/qnh-shelf-life/mobile-validation/output/native-qa/
+            apps/qnh-shelf-life/mobile-validation/build/emulator.log
+          if-no-files-found: warn
           retention-days: 14

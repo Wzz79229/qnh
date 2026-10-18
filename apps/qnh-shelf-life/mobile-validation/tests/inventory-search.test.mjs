@@ -46,3 +46,8 @@ test('a canceled request or stale query URL cannot publish results',async t=>{
  const h=harness(t);h.runtime.search('1',filters,'777');h.runtime.cancel();h.waiters[0].resolve(true);await h.settle();assert.equal(h.runtime.inspect().status,'idle');
  h.state.updated=false;location.href=INVENTORY_URL;h.runtime.search('2',filters,'777');h.waiters[1].resolve(true);await h.settle();assert.equal(h.runtime.inspect().status,'error');
 });
+test('lightweight idle checks still detect logout without reading inventory controls',t=>{
+ const h=harness(t);h.control.root.querySelector=()=>{throw Error('Heavy inventory read');};
+ assert.equal(h.runtime.inspect(false).authorized,true);assert.equal(h.runtime.inspect(false).productReady,false);
+ h.state.loggedIn=false;assert.equal(h.runtime.inspect(false).authorized,false);assert.equal(h.runtime.inspect(false).tenantId,'');
+});

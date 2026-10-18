@@ -14,4 +14,5 @@ public final class KuguanApplication extends Application implements Application.
     @Override public void onActivityResumed(Activity activity){}
     @Override public void onActivityPaused(Activity activity){}
     @Override public void onActivitySaveInstanceState(Activity activity,Bundle state){}
+    @Override public void onTrimMemory(int level){super.onTrimMemory(level);QnhConnection.get(this).trimMemory(level);}
 }

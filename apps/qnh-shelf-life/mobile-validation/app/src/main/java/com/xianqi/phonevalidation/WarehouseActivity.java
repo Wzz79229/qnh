@@ -1,26 +1,23 @@
 package com.xianqi.phonevalidation;
-
-import android.app.Activity;
 import android.content.Intent;
-import android.graphics.Color;
 import android.os.Bundle;
-import android.view.View;
+import android.view.Gravity;
 import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.TextView;
+import android.widget.ScrollView;
 
-/** Feature hub. Paused shelf-life code and on-device data remain available for future updates. */
+/** Small feature hub sharing the native label workspace's visual style. */
 public final class WarehouseActivity extends QnhProtectedActivity {
-    private int dp(int value) { return Math.round(value*getResources().getDisplayMetrics().density); }
-    @Override public void onCreate(Bundle state) {
-        super.onCreate(state); LinearLayout root=new LinearLayout(this); root.setOrientation(LinearLayout.VERTICAL); root.setBackgroundColor(Color.rgb(243,246,250));
-        root.setOnApplyWindowInsetsListener((view,insets)->{ view.setPadding(dp(24),insets.getSystemWindowInsetTop()+dp(28),dp(24),insets.getSystemWindowInsetBottom()+dp(20)); return insets; });
-        android.widget.ImageView icon=new android.widget.ImageView(this);icon.setImageResource(R.mipmap.ic_launcher);icon.setContentDescription("库管应用图标");root.addView(icon,new LinearLayout.LayoutParams(dp(72),dp(72)));
-        TextView title=new TextView(this); title.setText("库管"); title.setTextSize(34); title.setTextColor(Color.rgb(24,51,76)); root.addView(title);
-        TextView intro=new TextView(this); intro.setText("仓库日常工具"); intro.setTextSize(16); intro.setPadding(0,dp(8),0,dp(30)); root.addView(intro);
-        Button labels=new Button(this); labels.setAllCaps(false); labels.setText("库位标签\n生成 80 × 60 毫米标签图片"); labels.setTextSize(18); labels.setPadding(dp(12),dp(18),dp(12),dp(18)); labels.setOnClickListener(v->{if(requireQnhAccess())startActivity(new Intent(this,LocationLabelActivity.class));}); root.addView(labels,new LinearLayout.LayoutParams(-1,dp(110)));
-        TextView paused=new TextView(this); paused.setText("保质期管理 · 已暂停"); paused.setTextSize(16); paused.setTextColor(Color.GRAY); paused.setPadding(dp(12),dp(32),0,0); root.addView(paused);
-        Button account=new Button(this);account.setText("退出登录 / 切换牵牛花账号");account.setOnClickListener(v->{account.setEnabled(false);QnhConnection.get(this).signOut(()->{account.setEnabled(true);requireQnhAccess();});});root.addView(account);
-        View spacer=new View(this); root.addView(spacer,new LinearLayout.LayoutParams(1,0,1)); TextView version=new TextView(this); version.setText("库管 0.4.0"); version.setTextColor(Color.GRAY); root.addView(version); setContentView(root);
+    private int dp(int value){return WarehouseUi.dp(this,value);}
+    @Override public void onCreate(Bundle state){super.onCreate(state);
+        FrameLayout container=new FrameLayout(this);container.setBackgroundColor(WarehouseUi.BG);ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);container.addView(scroll);
+        FrameLayout wrap=new FrameLayout(this);LinearLayout root=new LinearLayout(this){@Override protected void onMeasure(int w,int h){super.onMeasure(MeasureSpec.makeMeasureSpec(Math.min(MeasureSpec.getSize(w),dp(680)),MeasureSpec.EXACTLY),h);}};root.setOrientation(LinearLayout.VERTICAL);root.setPadding(dp(22),dp(26),dp(22),dp(24));wrap.addView(root,new FrameLayout.LayoutParams(-1,-2,Gravity.CENTER_HORIZONTAL));scroll.addView(wrap);
+        LinearLayout brand=new LinearLayout(this);brand.setGravity(Gravity.CENTER_VERTICAL);ImageView icon=new ImageView(this);icon.setImageResource(R.mipmap.ic_launcher);icon.setContentDescription("库管图标");brand.addView(icon,new LinearLayout.LayoutParams(dp(56),dp(56)));LinearLayout titles=new LinearLayout(this);titles.setPadding(dp(14),0,0,0);titles.setOrientation(LinearLayout.VERTICAL);titles.addView(WarehouseUi.text(this,"库管",29,WarehouseUi.INK,true));WarehouseUi.space(titles,5);titles.addView(WarehouseUi.text(this,"仓库日常工具",13,WarehouseUi.MUTED,false));brand.addView(titles);root.addView(brand);WarehouseUi.space(root,30);
+        LinearLayout label=WarehouseUi.card(this);label.addView(WarehouseUi.text(this,"库位标签",22,WarehouseUi.INK,true));WarehouseUi.space(label,9);label.addView(WarehouseUi.text(this,"查询商品，自动生成可打印的库位标签。",14,WarehouseUi.MUTED,false));WarehouseUi.space(label,18);label.addView(WarehouseUi.button(this,"开始查询  →",true,v->{if(requireQnhAccess())startActivity(new Intent(this,LocationLabelActivity.class));}));root.addView(label);WarehouseUi.space(root,14);
+        LinearLayout paused=WarehouseUi.card(this);paused.addView(WarehouseUi.text(this,"保质期管理",17,WarehouseUi.MUTED,true));WarehouseUi.space(paused,8);paused.addView(WarehouseUi.text(this,"已暂停",12,WarehouseUi.MUTED,false));root.addView(paused);WarehouseUi.space(root,24);
+        Button account=WarehouseUi.button(this,"退出登录 / 切换牵牛花账号",false,null);account.setOnClickListener(v->{account.setEnabled(false);QnhConnection.get(this).signOut(()->{account.setEnabled(true);requireQnhAccess();});});root.addView(account);WarehouseUi.space(root,18);root.addView(WarehouseUi.text(this,"库管 0.5.0",12,WarehouseUi.MUTED,false));
+        container.setOnApplyWindowInsetsListener((view,insets)->{container.setPadding(0,insets.getSystemWindowInsetTop(),0,insets.getSystemWindowInsetBottom());return insets;});setContentView(container);
     }
 }

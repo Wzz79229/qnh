@@ -18,8 +18,7 @@
             </intent-filter>
         </activity>
         <activity android:name=".WarehouseActivity" android:exported="false" />
-        <activity android:name=".LocationLabelActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" android:windowSoftInputMode="adjustResize" />
-        <activity android:name=".InventoryLookupActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".LocationLabelActivity" android:exported="false" android:windowSoftInputMode="adjustResize" />
         <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.labels" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/label_paths" />
         </provider>

@@ -20,7 +20,7 @@ public final class QnhLoginActivity extends Activity implements QnhConnection.Li
         LinearLayout brand=new LinearLayout(this);brand.setGravity(android.view.Gravity.CENTER_VERTICAL);ImageView icon=new ImageView(this);icon.setImageResource(com.xianqi.phonevalidation.R.mipmap.ic_launcher);icon.setContentDescription("库管应用图标");brand.addView(icon,new LinearLayout.LayoutParams(dp(44),dp(44)));
         TextView title=new TextView(this);title.setText("  库管 · 登录牵牛花");title.setTextSize(22);title.setTextColor(Color.rgb(18,63,73));brand.addView(title);root.addView(brand);
         status=new TextView(this);status.setText("请在下方牵牛花官方页面登录。验证成功后自动进入库管，并隐藏牵牛花页面。");status.setTextSize(14);status.setPadding(0,dp(10),0,dp(10));root.addView(status);
-        Button refresh=new Button(this);refresh.setText("重新加载登录页");refresh.setOnClickListener(v->qnh.freshLogin());root.addView(refresh);
+        Button refresh=WarehouseUi.button(this,"重新加载登录页",false,v->qnh.freshLogin());root.addView(refresh);
         browser=new FrameLayout(this);root.addView(browser,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);
     }
     @Override protected void onResume(){super.onResume();qnh.listen(this);qnh.attach(this,browser,true);if(first){first=false;qnh.freshLogin();}}
