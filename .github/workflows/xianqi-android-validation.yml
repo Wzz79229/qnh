@@ -60,6 +60,11 @@ jobs:
         run: |
           sdkmanager 'platforms;android-35' 'build-tools;34.0.0'
           gradle --no-daemon :app:testReleaseUnitTest :app:assembleRelease :app:lintRelease
+          core_jar=$(rg --files "$HOME/.gradle/caches/modules-2/files-2.1/com.google.zxing/core/3.5.3" | rg '/core-3\.5\.3\.jar$' | head -n 1)
+          test -n "$core_jar"
+          mkdir -p build/label-png-check
+          javac -cp "$core_jar" -d build/label-png-check tests/LabelPngTest.java
+          java -Djava.awt.headless=true -cp "$core_jar:build/label-png-check" com.xianqi.phonevalidation.LabelPngTest app/src/test/resources/label-example.png
           mkdir -p output
           cp app/build/outputs/apk/release/app-release-unsigned.apk output/kuguan-0.3.0-unsigned.apk
           cp "$ANDROID_HOME/build-tools/34.0.0/lib/apksigner.jar" output/apksigner.jar

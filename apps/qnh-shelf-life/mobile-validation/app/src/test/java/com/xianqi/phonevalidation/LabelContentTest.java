@@ -15,12 +15,6 @@ public class LabelContentTest {
     }
     @Test public void fullNineteenDigitSkuIsEncoded() throws Exception { roundTrip("2110000000000123456"); }
     @Test public void leadingZerosSurvivePrinting() throws Exception { roundTrip("0000001234567890123"); roundTrip("000123"); }
-    @Test public void exportedReferenceImageContainsTheFullSku() throws Exception {
-        java.awt.image.BufferedImage image=javax.imageio.ImageIO.read(getClass().getResourceAsStream("/label-example.png"));
-        assertEquals(945,image.getWidth()); assertEquals(709,image.getHeight());
-        BitArray scan=new BitArray(614); for(int x=0;x<614;x++) if((image.getRGB(301+x,330)&255)<128) scan.set(x);
-        assertEquals("2110000000000123456",new Code128Reader().decodeRow(330,scan,null).getText());
-    }
     @Test public void alphaNumericSkuIsSupported() throws Exception { roundTrip("SKU-A01-009"); }
     @Test public void specificationMatchesTheReferencedProject() {
         assertEquals("",LabelContent.cleanSpecification("null（5克(g)/套）"));
