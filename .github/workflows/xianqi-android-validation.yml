@@ -65,6 +65,7 @@ jobs:
           mkdir -p build/label-png-check
           javac -cp "$core_jar" -d build/label-png-check tests/LabelPngTest.java
           java -Djava.awt.headless=true -cp "$core_jar:build/label-png-check" com.xianqi.phonevalidation.LabelPngTest app/src/test/resources/label-example.png
+          python -c "from zipfile import ZipFile; z=ZipFile('app/build/outputs/apk/release/app-release-unsigned.apk'); names=z.namelist(); assert 'assets/inventory.js' in names; assert 'assets/qnh-phone.js' not in names and 'assets/batch.js' not in names"
           mkdir -p output
           cp app/build/outputs/apk/release/app-release-unsigned.apk output/kuguan-0.5.0-unsigned.apk
           cp "$ANDROID_HOME/build-tools/34.0.0/lib/apksigner.jar" output/apksigner.jar

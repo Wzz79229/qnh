@@ -22,7 +22,7 @@ android {
     }
     lint { abortOnError true; checkReleaseBuilds true }
     // Keep paused shelf-life sources and encrypted phone data for a future release.
-    sourceSets { main { java { exclude '**/MainActivity.java', '**/CaptureActivity.java', '**/CloudClient.java', '**/DraftStore.java', '**/InventoryLookupActivity.java' }; assets { exclude 'qnh-phone.js', 'batch.js' } } }
+    sourceSets { main { java { exclude '**/MainActivity.java', '**/CaptureActivity.java', '**/CloudClient.java', '**/DraftStore.java', '**/InventoryLookupActivity.java' }; assets.srcDirs=['src/main/active-assets'] } }
 }
 
 dependencies {
