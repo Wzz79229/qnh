@@ -1,0 +1,32 @@
+{
+  "version": "0.5.1",
+  "sourceCommit": "3a6f5f97ddc8290634b313222e84721256126a63",
+  "release": {
+    "file": "kuguan-0.5.1.apk",
+    "size": 134396,
+    "sha256": "5a8e955574baef97eb750ba5846f5f08db5147d625a458dca9b0e575687a5160",
+    "unsignedSha256": "63030e7acebf44e55a167c7cb26e74c6660cfed74729cb93231df4413865b37d",
+    "signingCertificateSha256": "799dedd15fed804b5de65b785631561bd51b415afbde2e3074e60cd1f09e9c9a"
+  },
+  "ci": {
+    "runId": 39112315910,
+    "apkJob": 117630867933,
+    "nativeUiJob": 117631132067,
+    "conclusion": "success"
+  },
+  "checks": {
+    "scriptTests": 40,
+    "releaseUnitTests": "passed including automatic query classification",
+    "releaseBuild": "passed",
+    "androidLint": "passed",
+    "apkSignature": "passed v2 and v3; same signing certificate",
+    "nativeFlow": "passed actual QNH login activity, protected label activity, hidden WebView and bundled runtime against controlled HTML fixture",
+    "skuQuery": "passed auto-selection and preview",
+    "nameQuery": "passed selecting second result and generating its location label",
+    "locationQuery": "passed",
+    "transientTenantHeaderGap": "passed at query and flow navigation; no login reopens, data withheld until identity reconfirmed",
+    "nativeImage": "passed full SKU decode, RGB565 size, black/white, 300 DPI",
+    "screenshots": "portrait and wide passed; synthetic data",
+    "realQnhBackendPhoneValidation": "not performed in this run"
+  }
+}
