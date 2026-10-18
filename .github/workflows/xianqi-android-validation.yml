@@ -67,13 +67,13 @@ jobs:
           java -Djava.awt.headless=true -cp "$core_jar:build/label-png-check" com.xianqi.phonevalidation.LabelPngTest app/src/test/resources/label-example.png
           python -c "from zipfile import ZipFile; z=ZipFile('app/build/outputs/apk/release/app-release-unsigned.apk'); names=z.namelist(); assert 'assets/inventory.js' in names; assert 'assets/qnh-phone.js' not in names and 'assets/batch.js' not in names"
           mkdir -p output
-          cp app/build/outputs/apk/release/app-release-unsigned.apk output/kuguan-0.6.1-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk output/kuguan-0.7.0-unsigned.apk
           cp "$ANDROID_HOME/build-tools/34.0.0/lib/apksigner.jar" output/apksigner.jar
           cd output
           sha256sum *.apk *.jar > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: kuguan-android-0.6.1-unsigned
+          name: kuguan-android-0.7.0-unsigned
           path: |
             apps/qnh-shelf-life/mobile-validation/output/*.apk
             apps/qnh-shelf-life/mobile-validation/output/*.jar
@@ -141,13 +141,14 @@ jobs:
           adb shell settings put global animator_duration_scale 0
           adb install -r app/build/outputs/apk/debug/app-debug.apk
           adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          adb shell pm grant com.xianqi.phonevalidation android.permission.CAMERA
           # No launcher is needed for explicitly launched instrumentation activities.
           # Disable only that emulator component; keep application error dialogs enabled.
           adb shell pm disable-user --user 0 com.google.android.apps.nexuslauncher
           mkdir -p output/native-qa
           timeout 120 adb shell am instrument -w com.xianqi.phonevalidation.test/com.xianqi.phonevalidation.LabelInstrumentation | tee output/native-qa/portrait.log
           python -c "from pathlib import Path; assert 'CHECKS PASSED' in Path('output/native-qa/portrait.log').read_text()"
-          for file in label-native.png label-720w.png label-regression.png label-regression-720w.png printer-job.bin workspace-query.png workspace-label.png; do
+          for file in label-native.png label-regression.png workspace-query.png workspace-label.png workspace-batch.png batch-001.png batch-002.png gallery-check.json; do
             adb exec-out run-as com.xianqi.phonevalidation cat "files/$file" > "output/native-qa/$file"
           done
           adb shell wm size 1920x1200
@@ -163,7 +164,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: kuguan-native-ui-0.6.1
+          name: kuguan-native-ui-0.7.0
           path: |
             apps/qnh-shelf-life/mobile-validation/output/native-qa/
             apps/qnh-shelf-life/mobile-validation/build/emulator.log

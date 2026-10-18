@@ -29,7 +29,7 @@ function harness(t){
  const state={tenant:'777',loggedIn:true,rows:[row],card:null,updated:true,requiresLogin:false},waiters=[];
  const inputs=Object.fromEntries(['name','sku','barcode','external'].map(k=>[k,new Input()])),locations=Array.from({length:4},()=>new Input());
  const control={inputs,locations,root:{querySelector:()=>null},button:{click(){if(state.updated)location.href=receipt(normalizeInventoryFilters({...Object.fromEntries(Object.entries(inputs).map(([k,v])=>[k,v.value])),loc:locations.map(v=>v.value).join('-').replace(/-+$/u,'')}));}}};
- const runtime=createInventorySearch({shell:()=>state.loggedIn,tenant:()=>state.tenant,requiresLogin:()=>state.requiresLogin,controls:()=>control,observe:()=>{let resolve;const promise=new Promise(r=>resolve=r);const watcher={promise,resolve,cancel:()=>resolve(false)};waiters.push(watcher);return watcher;},readRows:()=>state.rows.map(data=>({data,link:{click(){location.href=flow();}}})),readCard:()=>state.card});
+ const runtime=createInventorySearch({shell:()=>state.loggedIn,tenant:()=>state.tenant,requiresLogin:()=>state.requiresLogin,controls:()=>control,observe:()=>{let resolve;const promise=new Promise(r=>resolve=r);const watcher={promise,resolve,cancel:()=>resolve(false)};waiters.push(watcher);return watcher;},readRows:()=>state.rows.map((data,index)=>({data,link:{click(){location.href=flow(state.skus?.[index]||SKU);}}})),readCard:()=>state.card});
  return {runtime,state,control,waiters,settle:()=>new Promise(r=>setImmediate(r))};
 }
 test('name/location search returns choices and resolves the selected full SKU before returning data',async t=>{
@@ -59,4 +59,17 @@ test('a temporary shell gap while opening flow does not lose the selected row or
 test('an explicit login page discards the selected row rather than restoring it after login',async t=>{
  const h=harness(t);h.runtime.search('1',filters,'777');h.waiters[0].resolve(true);await h.settle();h.runtime.select('1',0,'777');h.state.loggedIn=false;h.state.requiresLogin=true;assert.equal(h.runtime.inspect().authState,'login_required');
  h.state.loggedIn=true;h.state.card={name:row.name,sku:SKU};assert.equal(h.runtime.inspect().status,'idle');assert.equal(h.runtime.inspect().row,undefined);
+});
+
+test('multiple selections recheck each returned inventory row and resolve distinct full SKUs',async t=>{
+ const h=harness(t),other={...row,spec:'1L/瓶',loc:'C55-3-14'};h.state.rows=[row,other];h.state.skus=[SKU,'0001234567890123457'];
+ h.runtime.search('1',{name:'合成'},'777');h.waiters[0].resolve(true);await h.settle();const returned=location.href;
+ assert.equal(h.runtime.select('1',0,'777'),true);h.state.card={name:row.name,sku:SKU};assert.equal(h.runtime.inspect().row.sku,SKU);
+ location.href=returned;assert.equal(h.runtime.select('1',1,'777'),true);assert.equal(h.runtime.inspect().row,undefined);h.state.card={name:other.name,sku:h.state.skus[1]};assert.equal(h.runtime.inspect().row.sku,h.state.skus[1]);assert.equal(h.runtime.inspect().row.loc,'C55-3-14');
+});
+test('a changed batch table, cancellation or a different tenant prevents another selection',async t=>{
+ const h=harness(t),other={...row,loc:'C55-3-14'};h.state.rows=[row,other];h.runtime.search('1',{name:'合成'},'777');h.waiters[0].resolve(true);await h.settle();const returned=location.href;
+ h.runtime.select('1',0,'777');h.state.card={name:row.name,sku:SKU};h.runtime.inspect();location.href=returned;
+ h.state.rows=[{...row,spec:'changed'},other];assert.equal(h.runtime.select('1',1,'777'),false);
+ h.state.rows=[row,other];h.state.tenant='888';assert.equal(h.runtime.select('1',1,'777'),false);h.state.tenant='777';h.runtime.cancel();assert.equal(h.runtime.select('1',1,'777'),false);
 });

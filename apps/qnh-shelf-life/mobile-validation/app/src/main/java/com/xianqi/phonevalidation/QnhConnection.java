@@ -30,7 +30,7 @@ import java.nio.charset.StandardCharsets;
 /** One lazy on-device browser, cached static assets and one runtime injection per document. */
 public final class QnhConnection {
     public static final String INVENTORY="https://qnh.meituan.com/#/co-wms/inventory-query-integration/list?tab=goodsBatch";
-    public interface Listener {void onQnhSnapshot(JSONObject value);void onQnhMessage(String message);}
+    public interface Listener {void onQnhSnapshot(JSONObject value);void onQnhMessage(String message);default void onQnhPageProgress(int progress){}}
     public interface Result {void accept(Object value);}
     private static QnhConnection instance;
     public static synchronized QnhConnection get(Context context){if(instance==null)instance=new QnhConnection(context.getApplicationContext());return instance;}
@@ -61,7 +61,7 @@ public final class QnhConnection {
         java.util.regex.Matcher version=java.util.regex.Pattern.compile("Chrome/([0-9.]+)").matcher(settings.getUserAgentString());String chrome=version.find()?version.group(1):"120.0.0.0";
         settings.setUserAgentString("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/"+chrome+" Safari/537.36");
         CookieManager.getInstance().setAcceptCookie(true);CookieManager.getInstance().setAcceptThirdPartyCookies(web,true);
-        web.setWebChromeClient(new WebChromeClient(){@Override public void onPermissionRequest(PermissionRequest request){request.deny();}
+        web.setWebChromeClient(new WebChromeClient(){@Override public void onProgressChanged(WebView view,int progress){if(view==web&&loginVisible&&listener!=null)listener.onQnhPageProgress(progress);}@Override public void onPermissionRequest(PermissionRequest request){request.deny();}
             @Override public boolean onCreateWindow(WebView view,boolean dialog,boolean gesture,android.os.Message result){return false;}
             @Override public void onShowCustomView(View view,CustomViewCallback callback){callback.onCustomViewHidden();}
         });
@@ -95,6 +95,8 @@ public final class QnhConnection {
     public void trimMemory(int level){if(!active&&(level==ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW||level==ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL||level>=ComponentCallbacks2.TRIM_MEMORY_BACKGROUND))releaseBrowser();}
     private void releaseBrowser(){if(active||web==null)return;WebView old=web;web=null;navigation++;ready=false;loaded=false;injected=false;probing=false;gate.clear();if(old.getParent() instanceof ViewGroup)((ViewGroup)old.getParent()).removeView(old);old.stopLoading();old.destroy();owner=null;context.setBaseContext(app);}
     public void freshLogin(){ensureBrowser();gate.clear();ready=false;probing=false;loaded=true;injected=false;lastInventory=INVENTORY;web.loadUrl(INVENTORY);kick();}
+    public void loginPage(){ensureBrowser();if(!loaded){loaded=true;web.loadUrl(INVENTORY);}kick();}
+    public boolean loginZoom(boolean larger){return loginVisible&&web!=null&&(larger?web.zoomIn():web.zoomOut());}
     public void signOut(Runnable done){gate.clear();loginRequired=true;ready=false;navigation++;probing=false;lastInventory=INVENTORY;if(web!=null)web.stopLoading();CookieManager.getInstance().removeAllCookies(ignored->{CookieManager.getInstance().flush();android.webkit.WebStorage.getInstance().deleteAllData();done.run();});}
     public void inventory(){ensureBrowser();if(!loaded||!isInventory()){loaded=true;web.loadUrl(lastInventory);}kick();}
     public boolean isInventory(){return web!=null&&isInventoryUrl(web.getUrl());}

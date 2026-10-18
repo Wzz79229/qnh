@@ -96,9 +96,10 @@ export function createInventorySearch({shell=readLoggedInQnhShell,tenant=readObs
       const control=controls(),button=control?.root.querySelector('.wms-ant-pagination-'+(direction===1?'next':'prev')+' button');if(!button||button.disabled)return false;
       return execute(requestId,state.filters,scope,Number(queryOf(location.href).get('current'))+direction,()=>button.click(),false);
     },
-    select(requestId,index,scope){if(state.status!=='found'||String(requestId)!==state.requestId||!matches(scope)||location.href!==receipt||!Number.isInteger(index)||index<0||index>=state.rows.length)return false;
+    select(requestId,index,scope){if(!['found','selected'].includes(state.status)||String(requestId)!==state.requestId||!matches(scope)||location.href!==receipt||!Number.isInteger(index)||index<0||index>=state.rows.length)return false;
       try{const control=controls();if(!control||!sameInputs(control,state.filters))return false;const rows=readRows(control),row=rows[index];if(!row||JSON.stringify(row.data)!==JSON.stringify(state.rows[index]))return false;
-        selected={data:row.data,deadline:now()+20000};state={...state,status:'resolving'};row.link.click();return true;
+        if(state.status==='selected'&&JSON.stringify(rows.map(item=>item.data))!==JSON.stringify(state.rows))return false;
+        selected={data:row.data,deadline:now()+20000};const {row:previousRow,...remaining}=state;state={...remaining,status:'resolving'};row.link.click();return true;
       }catch{return false;}
     },
     openStores(){if(!identity()||!inventoryPage(location.href))return false;cancel();if(!storeColumns().length)storeToggle()?.click();return true;},

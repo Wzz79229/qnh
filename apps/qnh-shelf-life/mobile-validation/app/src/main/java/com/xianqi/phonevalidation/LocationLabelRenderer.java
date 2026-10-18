@@ -37,7 +37,6 @@ final class LocationLabelRenderer {
         c.save(); c.translate(x+(width-p.measureText(text)*scale)/2,baseline); c.scale(scale,1); c.drawText(text,0,0,p); c.restore();
     }
     static Bitmap render(LabelContent data) {return new LocationLabelRenderer(DPI,WIDTH,HEIGHT).draw(data);}
-    static Bitmap renderFor720W(LabelContent data){return new LocationLabelRenderer(203.2f,640,480).draw(data);}
     private Bitmap draw(LabelContent data) {
         float left=mm(2.5f), width=targetWidth-left*2, gap=mm(1), barcodeWidth=mm(52), barcodeHeight=mm(8);
         Paint namePaint=paint(11,false), specPaint=paint(15,false), skuPaint=paint(18,false);

@@ -15,15 +15,17 @@ import android.os.Bundle;
 
 /** One responsive screen: query, immutable product details and automatically rendered label. */
 public final class LabelWorkspace extends FrameLayout {
-    public interface Actions {void back();void save();void share();void print();}
+    public interface Actions {void back();void save();void share();default void previous(){}default void next(){}}
     public final InventorySearchPanel search;
     public final LinearLayout productCard;
     public final ImageView preview;
-    public final Button save,share,print;
+    public final Button save,share,previous,next;
     private final Activity activity;
     private final LinearLayout body,previewCard,placeholder;
     private final TextView productName,spec,sku,location,store,status;
     private final TextView placeholderTitle,placeholderText;
+    private final TextView pageNumber;private final LinearLayout pageNavigation;
+    private int pageIndex=0,pageTotal=1;
     private final ScrollView scroll;
     private boolean wide=false;
     private int dp(int n){return WarehouseUi.dp(activity,n);}
@@ -47,8 +49,9 @@ public final class LabelWorkspace extends FrameLayout {
         placeholderTitle=WarehouseUi.text(activity,"查询商品后自动生成",15,WarehouseUi.INK,true);placeholder.addView(placeholderTitle);WarehouseUi.space(placeholder,6);placeholderText=WarehouseUi.text(activity,"无需填写商品资料或点击生成",12,WarehouseUi.MUTED,false);placeholder.addView(placeholderText);previewCard.addView(placeholder);
         preview=new ImageView(activity);preview.setAdjustViewBounds(true);preview.setScaleType(ImageView.ScaleType.FIT_CENTER);preview.setContentDescription("80×60毫米库位标签预览");preview.setVisibility(GONE);previewCard.addView(preview,new LinearLayout.LayoutParams(-1,-2));WarehouseUi.space(previewCard,12);
         status=WarehouseUi.text(activity,"300 DPI PNG · 完整 SKU 条码",12,WarehouseUi.MUTED,false);previewCard.addView(status);WarehouseUi.space(previewCard,14);
-        LinearLayout exports=new LinearLayout(activity);save=WarehouseUi.button(activity,"保存图片",true,v->actions.save());share=WarehouseUi.button(activity,"分享",false,v->actions.share());print=WarehouseUi.button(activity,"打印",false,v->actions.print());
-        LinearLayout.LayoutParams first=new LinearLayout.LayoutParams(0,dp(46),1.3f);first.setMarginEnd(dp(8));exports.addView(save,first);LinearLayout.LayoutParams second=new LinearLayout.LayoutParams(0,dp(46),1);second.setMarginEnd(dp(8));exports.addView(share,second);exports.addView(print,new LinearLayout.LayoutParams(0,dp(46),1));previewCard.addView(exports);arrange(false);setActions(false);
+        pageNavigation=new LinearLayout(activity);pageNavigation.setGravity(Gravity.CENTER_VERTICAL);previous=WarehouseUi.button(activity,"上一张",false,v->actions.previous());previous.setTag("batch-previous");next=WarehouseUi.button(activity,"下一张",false,v->actions.next());next.setTag("batch-next");pageNumber=WarehouseUi.text(activity,"",12,WarehouseUi.INK,true);pageNumber.setGravity(Gravity.CENTER);pageNavigation.addView(previous,new LinearLayout.LayoutParams(0,dp(44),1));pageNavigation.addView(pageNumber,new LinearLayout.LayoutParams(0,-2,1));pageNavigation.addView(next,new LinearLayout.LayoutParams(0,dp(44),1));pageNavigation.setVisibility(GONE);previewCard.addView(pageNavigation);WarehouseUi.space(previewCard,10);
+        LinearLayout exports=new LinearLayout(activity);save=WarehouseUi.button(activity,"保存图片",true,v->actions.save());share=WarehouseUi.button(activity,"分享图片",false,v->actions.share());
+        LinearLayout.LayoutParams first=new LinearLayout.LayoutParams(0,dp(46),1);first.setMarginEnd(dp(8));exports.addView(save,first);exports.addView(share,new LinearLayout.LayoutParams(0,dp(46),1));previewCard.addView(exports);arrange(false);setActions(false);
         setOnApplyWindowInsetsListener((view,insets)->{setPadding(0,insets.getSystemWindowInsetTop(),0,insets.getSystemWindowInsetBottom());return insets;});setFocusableInTouchMode(true);requestFocus();
     }
     private void arrange(boolean next){wide=next;body.removeAllViews();body.setOrientation(next?LinearLayout.HORIZONTAL:LinearLayout.VERTICAL);
@@ -57,11 +60,13 @@ public final class LabelWorkspace extends FrameLayout {
     }
     @Override protected void onSizeChanged(int w,int h,int oldw,int oldh){super.onSizeChanged(w,h,oldw,oldh);boolean next=w>=dp(720);if(next!=wide&&body!=null)post(()->arrange(next));}
     public void showRecord(LabelContent data,String source){productName.setText(data.name);spec.setText("规格  "+(data.spec.isEmpty()?"未设置":data.spec));sku.setText("SKU  "+data.sku);location.setText("库位  "+data.location);store.setText(source);productCard.setVisibility(VISIBLE);}
-    public void clear(){productCard.setVisibility(GONE);preview.setImageDrawable(null);preview.setVisibility(GONE);placeholder.setVisibility(VISIBLE);placeholderTitle.setText("查询商品后自动生成");placeholderText.setText("无需填写商品资料或点击生成");setActions(false);status.setText("300 DPI PNG · 完整 SKU 条码");}
+    public void clear(){productCard.setVisibility(GONE);preview.setImageDrawable(null);preview.setVisibility(GONE);placeholder.setVisibility(VISIBLE);placeholderTitle.setText("查询商品后自动生成");placeholderText.setText("多条结果可勾选后批量生成");pageNavigation.setVisibility(GONE);pageIndex=0;pageTotal=1;save.setText("保存图片");share.setText("分享图片");setActions(false);status.setText("300 DPI PNG · 完整 SKU 条码");}
     public void rendering(){preview.setImageDrawable(null);preview.setVisibility(GONE);placeholder.setVisibility(VISIBLE);placeholderTitle.setText("正在生成标签");placeholderText.setText("正在本机排版，请稍候");setActions(false);status.setText("正在本机生成标签…");}
+    public void rendering(int done,int total){rendering();placeholderText.setText("正在生成 "+done+" / "+total+" 张，请稍候");}
     public void failed(String message){preview.setImageDrawable(null);preview.setVisibility(GONE);placeholder.setVisibility(VISIBLE);placeholderTitle.setText("标签未能生成");placeholderText.setText("商品已查到，请查看下方原因");setActions(false);status.setText(message);search.message("商品查询成功，标签生成失败，请查看下方原因。");}
-    public void showImage(Bitmap image){preview.setImageBitmap(image);preview.setVisibility(VISIBLE);placeholder.setVisibility(GONE);setActions(true);status.setText("已自动生成 · 945 × 709 px · 300 DPI");}
+    public void showImage(Bitmap image){showPage(image,0,1);}
+    public void showPage(Bitmap image,int index,int total){pageIndex=index;pageTotal=total;preview.setImageBitmap(image);preview.setVisibility(VISIBLE);placeholder.setVisibility(GONE);pageNavigation.setVisibility(total>1?VISIBLE:GONE);pageNumber.setText((index+1)+" / "+total);save.setText(total>1?"保存全部图片":"保存图片");share.setText(total>1?"批量分享":"分享图片");setActions(true);status.setText(total>1?"已生成 "+total+" 张 · 每张 80×60 mm / 300 DPI":"已自动生成 · 945 × 709 px · 300 DPI");}
     public void message(String value){status.setText(value);}
-    public void setActions(boolean enabled){save.setEnabled(enabled);share.setEnabled(enabled);print.setEnabled(enabled);}
+    public void setActions(boolean enabled){save.setEnabled(enabled);share.setEnabled(enabled);previous.setEnabled(enabled&&pageIndex>0);next.setEnabled(enabled&&pageIndex+1<pageTotal);}
     public void revealResult(){post(()->scroll.smoothScrollTo(0,Math.max(0,body.getTop()-dp(12))));}
 }

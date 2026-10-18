@@ -20,7 +20,7 @@ final class LabelRegressionCheck {
         LabelCaptionLayout.Metrics metrics=new LabelCaptionLayout.Metrics(){public float width(String text,float points){paint.setTextSize(points*300/72f);return paint.measureText(text);}public float height(float points){paint.setTextSize(points*300/72f);Paint.FontMetrics fm=paint.getFontMetrics();return fm.descent-fm.ascent;}};
         LabelCaptionLayout.Plan plan=LabelCaptionLayout.fit("SKU:198822",width,height,metrics);check(plan.points>=9,"Caption became too small");for(String line:plan.lines)check(metrics.width(line,plan.points)<=width,"Caption overflow");
         LabelContent value=LabelContent.create("【规格可选】示例泡沫地垫 厚1cm 儿童爬行垫 加厚拼接地板垫 1片/份","白色30×30cm",SKU,"A10-1-1");
-        verify(test,LocationLabelRenderer.render(value),"label-regression.png");verify(test,LocationLabelRenderer.renderFor720W(value),"label-regression-720w.png");
+        verify(test,LocationLabelRenderer.render(value),"label-regression.png");
     }
     private static void verify(Instrumentation test,Bitmap image,String file)throws Exception{try{
         boolean decoded=false;int[] pixels=new int[image.getWidth()];
