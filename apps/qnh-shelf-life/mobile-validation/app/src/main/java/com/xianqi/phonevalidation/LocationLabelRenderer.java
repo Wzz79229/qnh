@@ -15,9 +15,11 @@ import java.util.zip.CRC32;
 /** Port of the user's 80 x 60 mm printer template: name/spec/SKU row/large location. */
 final class LocationLabelRenderer {
     static final int DPI=300, WIDTH=945, HEIGHT=709;
-    private static float mm(float value) { return value*DPI/25.4f; }
-    private static float pt(float value) { return value*DPI/72f; }
-    private static Paint paint(float points, boolean heavy) {
+    private final float resolution; private final int targetWidth,targetHeight;
+    private LocationLabelRenderer(float resolution,int width,int height){this.resolution=resolution;targetWidth=width;targetHeight=height;}
+    private float mm(float value) { return value*resolution/25.4f; }
+    private float pt(float value) { return value*resolution/72f; }
+    private Paint paint(float points, boolean heavy) {
         Paint p=new Paint(Paint.ANTI_ALIAS_FLAG); p.setColor(Color.BLACK); p.setTextSize(pt(points));
         p.setTypeface(Typeface.create(heavy?"sans-serif-black":"sans-serif",Typeface.BOLD)); return p;
     }
@@ -34,33 +36,36 @@ final class LocationLabelRenderer {
         Paint.FontMetrics f=p.getFontMetrics(); float baseline=y+(height-f.descent-f.ascent)/2;
         c.save(); c.translate(x+(width-p.measureText(text)*scale)/2,baseline); c.scale(scale,1); c.drawText(text,0,0,p); c.restore();
     }
-    static Bitmap render(LabelContent data) {
-        float left=mm(2.5f), width=WIDTH-left*2, gap=mm(1), barcodeWidth=mm(52), barcodeHeight=mm(8);
+    static Bitmap render(LabelContent data) {return new LocationLabelRenderer(DPI,WIDTH,HEIGHT).draw(data);}
+    static Bitmap renderFor720W(LabelContent data){return new LocationLabelRenderer(203.2f,640,480).draw(data);}
+    private Bitmap draw(LabelContent data) {
+        float left=mm(2.5f), width=targetWidth-left*2, gap=mm(1), barcodeWidth=mm(52), barcodeHeight=mm(8);
         Paint namePaint=paint(11,false), specPaint=paint(15,false), skuPaint=paint(18,false);
         List<String> names=wrap(data.name,namePaint,width), specs=wrap("规格："+data.spec,specPaint,width);
         float nameLine=pt(11)+mm(2), specLine=pt(15)+mm(2), padding=mm(4), locSize=54;
         float fixed=names.size()*nameLine+specs.size()*specLine+barcodeHeight+gap*(specs.isEmpty()?2:3);
-        if(fixed+pt(locSize)+padding*2>HEIGHT) padding=mm(2.5f);
+        if(fixed+pt(locSize)+padding*2>targetHeight) padding=mm(2.5f);
         Paint locPaint=paint(locSize,true);
-        while(locSize>16 && (locPaint.measureText(data.location)>width || fixed+pt(locSize)+padding*2>HEIGHT)) { locSize-=.5f; locPaint.setTextSize(pt(locSize)); }
-        if(locPaint.measureText(data.location)>width || fixed+pt(locSize)+padding*2>HEIGHT) throw new IllegalArgumentException("商品资料超过标签可容纳范围，请在牵牛花维护资料后重新查询。");
+        while(locSize>16 && (locPaint.measureText(data.location)>width || fixed+pt(locSize)+padding*2>targetHeight)) { locSize-=.5f; locPaint.setTextSize(pt(locSize)); }
+        if(locPaint.measureText(data.location)>width || fixed+pt(locSize)+padding*2>targetHeight) throw new IllegalArgumentException("商品资料超过标签可容纳范围，请在牵牛花维护资料后重新查询。");
         float skuWidth=width-barcodeWidth-gap, skuScale=Math.min(1,skuWidth/skuPaint.measureText(data.skuCaption()));
         if(skuScale<.6f) throw new IllegalArgumentException("SKU 文字无法清晰排入标签，请核对编码。");
-        Bitmap bitmap=Bitmap.createBitmap(WIDTH,HEIGHT,Bitmap.Config.RGB_565); bitmap.setDensity(DPI); Canvas c=new Canvas(bitmap); c.drawColor(Color.WHITE);
-        float y=(HEIGHT-fixed-pt(locSize))/2;
+        Bitmap bitmap=Bitmap.createBitmap(targetWidth,targetHeight,Bitmap.Config.RGB_565); bitmap.setDensity(Math.round(resolution)); Canvas c=new Canvas(bitmap); c.drawColor(Color.WHITE);
+        float y=(targetHeight-fixed-pt(locSize))/2;
         for(int i=0;i<names.size();i++) { String line=names.get(i);
             center(c,line,left,y,width,nameLine,namePaint,false); y+=nameLine;
         } y+=gap;
         if(!specs.isEmpty()) { for(String line:specs) { center(c,line,left,y,width,specLine,specPaint,true); y+=specLine; } y+=gap; }
         Paint.FontMetrics skuMetrics=skuPaint.getFontMetrics();
         c.save(); c.translate(left,y+(barcodeHeight-skuMetrics.descent-skuMetrics.ascent)/2); c.scale(skuScale,1); c.drawText(data.skuCaption(),0,0,skuPaint); c.restore();
-        boolean[] bits=data.barcode(); float module=barcodeWidth/(bits.length+20);
-        float barcodeLeft=left+width-barcodeWidth+10*module;
+        boolean[] bits=data.barcode(); int module=(int)(barcodeWidth/(bits.length+20));
+        if(module<2)throw new IllegalArgumentException("当前打印分辨率无法清晰显示该SKU条码。");
+        float barcodeLeft=left+width-barcodeWidth+(barcodeWidth-bits.length*module)/2;
         Paint bars=new Paint(); bars.setColor(Color.BLACK); int top=Math.round(y),bottom=Math.round(y+barcodeHeight);
         for(int index=0;index<bits.length;index++) if(bits[index]) c.drawRect(Math.round(barcodeLeft+index*module),top,Math.round(barcodeLeft+(index+1)*module),bottom,bars);
         y+=barcodeHeight+gap; center(c,data.location,left,y,width,pt(locSize),locPaint,false);
-        int[] pixels=new int[WIDTH];
-        for(int row=0;row<HEIGHT;row++){bitmap.getPixels(pixels,0,WIDTH,0,row,WIDTH,1);for(int i=0;i<WIDTH;i++)pixels[i]=Color.red(pixels[i])<128?Color.BLACK:Color.WHITE;bitmap.setPixels(pixels,0,WIDTH,0,row,WIDTH,1);}
+        int[] pixels=new int[targetWidth];
+        for(int row=0;row<targetHeight;row++){bitmap.getPixels(pixels,0,targetWidth,0,row,targetWidth,1);for(int i=0;i<targetWidth;i++)pixels[i]=Color.red(pixels[i])<128?Color.BLACK:Color.WHITE;bitmap.setPixels(pixels,0,targetWidth,0,row,targetWidth,1);}
         return bitmap;
     }
     static byte[] png(Bitmap bitmap) throws Exception {

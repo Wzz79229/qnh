@@ -51,13 +51,20 @@ public final class QnhConnection {
         try(InputStream input=app.getAssets().open("inventory.js")){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int n;while((n=input.read(buffer))!=-1){if(out.size()+n>350000)throw new Exception();out.write(buffer,0,n);}runtime=out.toString(StandardCharsets.UTF_8.name());}catch(Exception ignored){}
     }
     @SuppressLint("SetJavaScriptEnabled") private void ensureBrowser(){if(web!=null)return;
-        web=new WebView(context);WebView.setWebContentsDebuggingEnabled(false);WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);
+        web=new WebView(context){
+            @Override public boolean dispatchTouchEvent(android.view.MotionEvent event){return loginVisible&&super.dispatchTouchEvent(event);}
+            @Override public boolean requestFocus(int direction,android.graphics.Rect previous){return loginVisible&&super.requestFocus(direction,previous);}
+            @Override public void bringToFront(){if(loginVisible)super.bringToFront();}
+        };web.setAlpha(0f);WebView.setWebContentsDebuggingEnabled(false);WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(false);settings.setAllowContentAccess(false);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);settings.setSaveFormData(false);settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setSupportZoom(true);settings.setBuiltInZoomControls(true);settings.setDisplayZoomControls(false);settings.setUseWideViewPort(true);settings.setLoadWithOverviewMode(true);settings.setMediaPlaybackRequiresUserGesture(true);
         java.util.regex.Matcher version=java.util.regex.Pattern.compile("Chrome/([0-9.]+)").matcher(settings.getUserAgentString());String chrome=version.find()?version.group(1):"120.0.0.0";
         settings.setUserAgentString("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/"+chrome+" Safari/537.36");
         CookieManager.getInstance().setAcceptCookie(true);CookieManager.getInstance().setAcceptThirdPartyCookies(web,true);
-        web.setWebChromeClient(new WebChromeClient(){@Override public void onPermissionRequest(PermissionRequest request){request.deny();}});
+        web.setWebChromeClient(new WebChromeClient(){@Override public void onPermissionRequest(PermissionRequest request){request.deny();}
+            @Override public boolean onCreateWindow(WebView view,boolean dialog,boolean gesture,android.os.Message result){return false;}
+            @Override public void onShowCustomView(View view,CustomViewCallback callback){callback.onCustomViewHidden();}
+        });
         web.setWebViewClient(new WebViewClient(){
             @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request){if(!request.isForMainFrame())return false;boolean allowed=QnhUrlPolicy.allowedTop(request.getUrl().toString());if(!allowed)message("已停止打开官方登录站点以外的地址。");return !allowed;}
             @Override public void onPageStarted(WebView view,String url,Bitmap icon){if(view!=web)return;navigation++;ready=false;probing=false;injected=false;if(!QnhUrlPolicy.qnhOrigin(url)){gate.clear();loginRequired=true;notifyLocked();}}
@@ -76,11 +83,11 @@ public final class QnhConnection {
         owner=activity;loginVisible=visible;if(visible)inventoryInterest=false;
         web.getSettings().setLoadsImagesAutomatically(visible);web.getSettings().setBlockNetworkImage(!visible);
         // Keep the SPA rendering: INVISIBLE can suspend its animation-frame updates.
-        // Feature screens have a full opaque native view above this browser at index zero.
-        web.setVisibility(View.VISIBLE);web.setFocusable(visible);web.setFocusableInTouchMode(visible);web.setImportantForAccessibility(visible?View.IMPORTANT_FOR_ACCESSIBILITY_AUTO:View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        // Transparency also prevents a frame from flashing through if the browser requests focus or changes Z order.
+        web.setVisibility(View.VISIBLE);web.setAlpha(visible?1f:0f);web.setFocusable(visible);web.setFocusableInTouchMode(visible);web.setImportantForAccessibility(visible?View.IMPORTANT_FOR_ACCESSIBILITY_AUTO:View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         host.addView(web,0,new FrameLayout.LayoutParams(-1,-1));web.resumeTimers();web.onResume();kick();
     }
-    public void releaseHost(Activity activity){if(owner==activity){if(web!=null&&web.getParent() instanceof ViewGroup)((ViewGroup)web.getParent()).removeView(web);owner=null;context.setBaseContext(app);}}
+    public void releaseHost(Activity activity){if(owner==activity){if(web!=null){web.setAlpha(0f);if(web.getParent() instanceof ViewGroup)((ViewGroup)web.getParent()).removeView(web);}owner=null;context.setBaseContext(app);}}
     public void foreground(boolean value){active=value;handler.removeCallbacks(tick);handler.removeCallbacks(release);
         if(value){if(web!=null){web.resumeTimers();web.onResume();}kick();}
         else{gate.clear();loginRequired=false;navigation++;probing=false;pending=false;if(web!=null){web.onPause();web.pauseTimers();}handler.postDelayed(release,60000);}

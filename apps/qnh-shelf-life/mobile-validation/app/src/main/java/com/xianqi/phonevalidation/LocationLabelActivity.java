@@ -28,6 +28,7 @@ import java.util.concurrent.Future;
 /** Query and label generation share one screen. Product fields are never editable. */
 public final class LocationLabelActivity extends QnhProtectedActivity implements InventorySearchPanel.Host {
     private LabelWorkspace ui;
+    private BluetoothLabelPrinter bluetoothPrinter;
     private final LabelRenderState selection=new LabelRenderState();
     private final ExecutorService renderer=Executors.newSingleThreadExecutor();
     private Future<?> renderJob;
@@ -40,7 +41,7 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
     @Override public void onCreate(Bundle state){super.onCreate(state);
         ui=new LabelWorkspace(this,this,state,new LabelWorkspace.Actions(){
             public void back(){finish();}public void save(){saveImage();}public void share(){shareImage();}public void print(){printImage();}
-        });setContentView(ui);
+        });setContentView(ui);bluetoothPrinter=new BluetoothLabelPrinter(this,new BluetoothLabelPrinter.Host(){public boolean allowed(String scope,LabelContent content){return requireQnhAccess()&&qnh.tenant().equals(scope)&&selection.content()==content&&png!=null;}public void message(String text){ui.message(text);}});
         if(state!=null)try{String raw=state.getString("selected-row","");if(!raw.isEmpty()&&raw.length()<3000)restored=new JSONObject(raw);}catch(Exception ignored){}
     }
     @Override public boolean allowSearch(){return requireQnhAccess();}
@@ -84,7 +85,8 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
             Uri uri=FileProvider.getUriForFile(this,getPackageName()+".labels",sharedFile);Intent send=new Intent(Intent.ACTION_SEND);send.setType("image/png");send.putExtra(Intent.EXTRA_STREAM,uri);send.setClipData(ClipData.newRawUri("库位标签",uri));send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(Intent.createChooser(send,"分享标签图片"));
         }catch(Exception error){ui.message("分享未完成，请保存图片后重试。");}
     }
-    private void printImage(){if(!requireQnhAccess()||png==null||selection.content()==null)return;final byte[] printing=png;final String title=selection.content().location;
+    private void printImage(){if(!requireQnhAccess()||png==null||selection.content()==null)return;new android.app.AlertDialog.Builder(this).setTitle("打印标签").setItems(new String[]{"得力720W（蓝牙直打）","系统打印"},(dialog,index)->{if(index==0)bluetoothPrinter.print(selection.content(),qnh.tenant());else systemPrintImage();}).setNegativeButton("取消",null).show();}
+    private void systemPrintImage(){if(!requireQnhAccess()||png==null||selection.content()==null)return;final byte[] printing=png;final String title=selection.content().location;
         PrintManager manager=(PrintManager)getSystemService(PRINT_SERVICE);if(manager==null){ui.message("手机尚未配置打印服务，可分享给标签打印软件。");return;}
         manager.print("库位标签 "+title,new PrintDocumentAdapter(){
             private PrintAttributes attributes;
@@ -103,11 +105,12 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
             }
         },new PrintAttributes.Builder().setMediaSize(new PrintAttributes.MediaSize("KUGUAN_80_60","80 × 60 毫米",3150,2362)).setResolution(new PrintAttributes.Resolution("label300","300 DPI",300,300)).setMinMargins(PrintAttributes.Margins.NO_MARGINS).setColorMode(PrintAttributes.COLOR_MODE_MONOCHROME).build());
     }
-    @Override public void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request!=41)return;byte[] bytes=savingBytes;savingBytes=null;
+    @Override public void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(bluetoothPrinter!=null&&bluetoothPrinter.activityResult(request,result))return;if(request!=41)return;byte[] bytes=savingBytes;savingBytes=null;
         if(result==RESULT_OK&&data!=null&&data.getData()!=null&&bytes!=null)try(OutputStream out=getContentResolver().openOutputStream(data.getData())){if(out==null)throw new Exception();out.write(bytes);ui.message("标签图片已保存。");}catch(Exception error){ui.message("保存未完成，请重试或使用分享。");}
     }
+    @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);if(bluetoothPrinter!=null)bluetoothPrinter.permissionsResult(request,results);}
     @Override protected void onPause(){ui.search.paused();super.onPause();}
     @Override protected void onSaveInstanceState(Bundle out){ui.search.saveState(out);LabelContent content=selection.content();if(content!=null)try{JSONObject row=new JSONObject();row.put("name",content.name);row.put("spec",content.spec);row.put("sku",content.sku);row.put("loc",content.location);row.put("store",store);row.put("tenant",selection.tenant());out.putString("selected-row",row.toString());}catch(Exception ignored){}super.onSaveInstanceState(out);}
     @Override public void onTrimMemory(int level){super.onTrimMemory(level);if(level>=TRIM_MEMORY_RUNNING_LOW&&png!=null&&!isQnhScreenActive())releaseBitmap();}
-    @Override public void onDestroy(){destroyed=true;selection.clear();if(renderJob!=null)renderJob.cancel(false);renderer.shutdownNow();ui.search.destroy();releaseBitmap();png=null;savingBytes=null;super.onDestroy();}
+    @Override public void onDestroy(){destroyed=true;if(bluetoothPrinter!=null)bluetoothPrinter.destroy();selection.clear();if(renderJob!=null)renderJob.cancel(false);renderer.shutdownNow();ui.search.destroy();releaseBitmap();png=null;savingBytes=null;super.onDestroy();}
 }

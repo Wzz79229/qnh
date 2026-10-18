@@ -77,7 +77,7 @@ public final class InventorySearchPanel extends LinearLayout {
     }
     private void fail(String value){cancel();status.setText(value);}
     public void authenticated(){qnh.watchInventory(true);qnh.inventory();}
-    public void suspended(){cancel();if(stores!=null){stores.dismiss();stores=null;}}
+    public void suspended(){cancel();status.setText("登录恢复后，请重新查询商品。");if(stores!=null){stores.dismiss();stores=null;}}
     public void clearTenant(){changing=true;for(EditText field:fields())field.setText("");changing=false;cancel();}
     public void message(String value){status.setText(value);}
     public void snapshot(JSONObject value){
