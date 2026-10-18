@@ -60,7 +60,7 @@ jobs:
         run: |
           sdkmanager 'platforms;android-35' 'build-tools;34.0.0'
           gradle --no-daemon :app:testReleaseUnitTest :app:assembleRelease :app:lintRelease
-          core_jar=$(rg --files "$HOME/.gradle/caches/modules-2/files-2.1/com.google.zxing/core/3.5.3" | rg '/core-3\.5\.3\.jar$' | head -n 1)
+          core_jar=$(find "$HOME/.gradle/caches/modules-2/files-2.1/com.google.zxing/core/3.5.3" -name 'core-3.5.3.jar' -print -quit)
           test -n "$core_jar"
           mkdir -p build/label-png-check
           javac -cp "$core_jar" -d build/label-png-check tests/LabelPngTest.java
