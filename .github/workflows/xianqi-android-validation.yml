@@ -120,10 +120,11 @@ jobs:
         working-directory: apps/qnh-shelf-life/mobile-validation
         run: |
           set -euo pipefail
+          mkdir -p build output/native-qa
           sudo chmod a+rw /dev/kvm
           echo no | avdmanager create avd --force --name kuguan-qa --package 'system-images;android-35;google_apis;x86_64' --device pixel_6
           "$ANDROID_HOME/emulator/emulator" @kuguan-qa -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048 > build/emulator.log 2>&1 &
-          adb wait-for-device
+          timeout 150 adb wait-for-device
           for attempt in $(seq 1 120); do
             if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; then break; fi
             sleep 2
@@ -136,14 +137,14 @@ jobs:
           adb install -r app/build/outputs/apk/debug/app-debug.apk
           adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
           mkdir -p output/native-qa
-          adb shell am instrument -w com.xianqi.phonevalidation.test/com.xianqi.phonevalidation.LabelInstrumentation | tee output/native-qa/portrait.log
+          timeout 120 adb shell am instrument -w com.xianqi.phonevalidation.test/com.xianqi.phonevalidation.LabelInstrumentation | tee output/native-qa/portrait.log
           python -c "from pathlib import Path; assert 'CHECKS PASSED' in Path('output/native-qa/portrait.log').read_text()"
           for file in label-native.png workspace-query.png workspace-label.png; do
             adb exec-out run-as com.xianqi.phonevalidation cat "files/$file" > "output/native-qa/$file"
           done
           adb shell wm size 1920x1200
           adb shell wm density 240
-          adb shell am instrument -w -e wide true com.xianqi.phonevalidation.test/com.xianqi.phonevalidation.LabelInstrumentation | tee output/native-qa/wide.log
+          timeout 120 adb shell am instrument -w -e wide true com.xianqi.phonevalidation.test/com.xianqi.phonevalidation.LabelInstrumentation | tee output/native-qa/wide.log
           python -c "from pathlib import Path; assert 'CHECKS PASSED' in Path('output/native-qa/wide.log').read_text()"
           adb exec-out run-as com.xianqi.phonevalidation cat files/workspace-wide.png > output/native-qa/workspace-wide.png
           core_jar=$(find "$HOME/.gradle/caches/modules-2/files-2.1/com.google.zxing/core/3.5.3" -name 'core-3.5.3.jar' -print -quit)
