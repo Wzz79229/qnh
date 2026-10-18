@@ -28,7 +28,7 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
     private final AtomicLong outputFence=new AtomicLong();
     private Future<?> renderJob;
     private Bitmap bitmap;
-    private LabelBatch batch;
+    private LabelBatch batch,sharedBatch;private List<File> sharedFiles;
     private int page=0,pageRequest=0;
     private boolean destroyed=false,exporting=false;
     private JSONArray selectedRows,restored;
@@ -42,7 +42,7 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
             public void back(){finish();}public void save(){saveImages();}public void share(){shareImages();}
             public void previous(){showPage(page-1);}public void next(){showPage(page+1);}
         });setContentView(ui);
-        if(state!=null)try{scannerTenant=state.getString("scanner-tenant","");String raw=state.getString("selected-rows","");if(!raw.isEmpty()&&raw.length()<80000){restored=new JSONArray(raw);restoredTenant=state.getString("selected-tenant","");}}catch(Exception ignored){}
+        if(state!=null)try{scannerTenant=state.getString("scanner-tenant","");String raw=state.getString("selected-rows","");if(!raw.isEmpty()&&raw.length()<200000){restored=new JSONArray(raw);restoredTenant=state.getString("selected-tenant","");}}catch(Exception ignored){}
     }
     @Override public boolean allowSearch(){return requireQnhAccess();}
     @Override public boolean active(){return isQnhScreenActive();}
@@ -51,13 +51,13 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
     @Override public void onBatchSelected(JSONArray rows){if(requireQnhAccess())renderRows(rows,true);}
     @Override public void onScan(){if(requireQnhAccess()){scannerTenant=qnh.tenant();startActivityForResult(new Intent(this,BarcodeScanActivity.class),62);}}
     private void consumeScan(){if(scanValue==null)return;String value=scanValue,format=scanFormat;scanValue=null;if(scannerTenant.equals(qnh.tenant()))ui.search.scanned(value,format);else ui.search.message("登录租户已改变，请重新扫码。");}
-    private void clearSelection(){outputFence.incrementAndGet();pageRequest++;selection.clear();restored=null;selectedRows=null;batch=null;page=0;permissionBatch=null;exporting=false;if(renderJob!=null)renderJob.cancel(false);ui.clear();releaseBitmap();}
+    private void clearSelection(){outputFence.incrementAndGet();pageRequest++;selection.clear();restored=null;selectedRows=null;batch=null;sharedBatch=null;sharedFiles=null;page=0;permissionBatch=null;exporting=false;if(renderJob!=null)renderJob.cancel(false);ui.clear();releaseBitmap();}
     private void releaseBitmap(){ui.preview.setImageDrawable(null);if(bitmap!=null&&!bitmap.isRecycled())bitmap.recycle();bitmap=null;}
     private boolean current(long ticket,String tenant){return !destroyed&&outputFence.get()==ticket&&batch!=null&&batch.tenant.equals(tenant);}
     private void renderRows(JSONArray rows,boolean reveal){
         clearSelection();
         try{
-            if(rows==null||rows.length()<1||rows.length()>LabelBatch.MAX_ITEMS)throw new IllegalArgumentException("每批请选择1至50个商品与库位。");
+            if(rows==null||rows.length()<1||rows.length()>LabelBatch.MAX_ITEMS)throw new IllegalArgumentException("每批最多500张，请按更细库位分批查询。");
             List<LabelContent> contents=new ArrayList<>();List<String> stores=new ArrayList<>();JSONArray normalized=new JSONArray();
             for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);String sku=row.getString("sku"),loc=row.optString("loc");
                 if(!sku.matches("[A-Za-z0-9._-]{1,64}"))throw new IllegalArgumentException("完整 SKU 尚未核实，请重新查询。");
@@ -69,11 +69,11 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
             ui.showRecord(first,stores.get(0));ui.rendering(0,contents.size());if(reveal)ui.revealResult();
             renderJob=renderer.submit(()->{
                 Bitmap firstImage=null;
-                try{List<LabelBatch.Entry> entries=new ArrayList<>();
+                try{List<LabelBatch.Entry> entries=new ArrayList<>();long imageBytes=0;
                     for(int i=0;i<contents.size();i++){
                         if(outputFence.get()!=ticket||Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
                         Bitmap image=LocationLabelRenderer.render(contents.get(i));
-                        try{entries.add(new LabelBatch.Entry(contents.get(i),stores.get(i),LocationLabelRenderer.png(image)));if(i==0){firstImage=image;image=null;}}finally{if(image!=null)image.recycle();}
+                        try{byte[] encoded=LocationLabelRenderer.png(image);imageBytes+=encoded.length;if(imageBytes>16*1024*1024)throw new IllegalArgumentException("本批图片过大，请按更细库位分批生成。");entries.add(new LabelBatch.Entry(contents.get(i),stores.get(i),encoded));if(i==0){firstImage=image;image=null;}}finally{if(image!=null)image.recycle();}
                         final int done=i+1;runOnUiThread(()->{if(!destroyed&&outputFence.get()==ticket)ui.rendering(done,contents.size());});
                     }
                     LabelBatch result=new LabelBatch(tenant,entries);Bitmap image=firstImage;firstImage=null;
@@ -102,19 +102,20 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
             catch(Exception error){runOnUiThread(()->{if(!current(ticket,captured.tenant))return;exporting=false;ui.setActions(true);ui.message("图片未保存完成，请检查手机剩余空间或使用分享。");});}});
     }
     private void shareImages(){
-        if(!canExport())return;LabelBatch captured=batch;long ticket=outputFence.get();exporting=true;ui.setActions(false);ui.message("正在准备 "+captured.size()+" 张图片…");
-        renderer.submit(()->{try{File folder=new File(new File(getCacheDir(),"labels"),java.util.UUID.randomUUID().toString());List<File> files=captured.writeImages(folder);
+        if(!canExport())return;LabelBatch captured=batch;long ticket=outputFence.get();List<File> reusable=sharedBatch==captured?sharedFiles:null;exporting=true;ui.setActions(false);ui.message("正在准备 "+captured.size()+" 张图片…");
+        renderer.submit(()->{try{File rootFolder=new File(getCacheDir(),"labels");purgeShareCache(rootFolder,reusable==null?null:reusable.get(0).getParentFile());File folder=new File(rootFolder,java.util.UUID.randomUUID().toString());List<File> files=reusable!=null?reusable:captured.writeImages(folder);
             runOnUiThread(()->{if(!current(ticket,captured.tenant))return;exporting=false;ui.setActions(true);if(!requireQnhAccess())return;try{
-                ArrayList<Uri> uris=new ArrayList<>();for(File file:files)uris.add(FileProvider.getUriForFile(this,getPackageName()+".labels",file));
+                sharedBatch=captured;sharedFiles=files;ArrayList<Uri> uris=new ArrayList<>();for(File file:files)uris.add(FileProvider.getUriForFile(this,getPackageName()+".labels",file));
                 Intent send=new Intent(uris.size()==1?Intent.ACTION_SEND:Intent.ACTION_SEND_MULTIPLE);send.setType("image/png");if(uris.size()==1)send.putExtra(Intent.EXTRA_STREAM,uris.get(0));else send.putParcelableArrayListExtra(Intent.EXTRA_STREAM,uris);
                 ClipData clip=ClipData.newRawUri("库位标签",uris.get(0));for(int i=1;i<uris.size();i++)clip.addItem(new ClipData.Item(uris.get(i)));send.setClipData(clip);send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);startActivity(Intent.createChooser(send,"分享 "+uris.size()+" 张标签图片"));
             }catch(Exception error){ui.message("没有找到可接收图片的应用，请保存到相册。");}});
         }catch(Exception error){runOnUiThread(()->{if(!current(ticket,captured.tenant))return;exporting=false;ui.setActions(true);ui.message("分享准备失败，请保存到相册后重试。");});}});
     }
+    private void purgeShareCache(File rootFolder,File preserve){File[] folders=rootFolder.listFiles();if(folders==null)return;long cutoff=System.currentTimeMillis()-24*60*60*1000L;for(File folder:folders)if(folder.isDirectory()&&!folder.equals(preserve)&&folder.getName().matches("[0-9a-f-]{36}")&&folder.lastModified()<cutoff){File[] files=folder.listFiles();if(files!=null)for(File file:files)if(file.isFile()&&file.getName().endsWith(".png"))file.delete();folder.delete();}}
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);if(request==51){LabelBatch pending=permissionBatch;permissionBatch=null;if(pending!=null&&pending==batch&&permissionTicket==outputFence.get()&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)saveImages();else ui.message("未获相册保存权限，可使用分享图片。");}}
     @Override protected void onPause(){ui.search.paused();super.onPause();}
     @Override public void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==62&&result==RESULT_OK&&data!=null){scanValue=data.getStringExtra("value");scanFormat=data.getStringExtra("format");if(active()&&requireQnhAccess())consumeScan();}}
-    @Override protected void onSaveInstanceState(Bundle out){ui.search.saveState(out);out.putString("scanner-tenant",scannerTenant);if(selectedRows!=null){out.putString("selected-rows",selectedRows.toString());out.putString("selected-tenant",selection.tenant());}super.onSaveInstanceState(out);}
+    @Override protected void onSaveInstanceState(Bundle out){ui.search.saveState(out);out.putString("scanner-tenant",scannerTenant);if(selectedRows!=null){String raw=selectedRows.toString();if(raw.length()<200000)out.putString("selected-rows",raw);out.putString("selected-tenant",selection.tenant());}super.onSaveInstanceState(out);}
     @Override public void onTrimMemory(int level){super.onTrimMemory(level);if(level>=TRIM_MEMORY_RUNNING_LOW&&batch!=null&&!isQnhScreenActive())releaseBitmap();}
     @Override public void onDestroy(){destroyed=true;outputFence.incrementAndGet();pageRequest++;selection.clear();if(renderJob!=null)renderJob.cancel(false);renderer.shutdownNow();ui.search.destroy();releaseBitmap();batch=null;super.onDestroy();}
 }

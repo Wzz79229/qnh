@@ -73,3 +73,9 @@ test('a changed batch table, cancellation or a different tenant prevents another
  h.state.rows=[{...row,spec:'changed'},other];assert.equal(h.runtime.select('1',1,'777'),false);
  h.state.rows=[row,other];h.state.tenant='888';assert.equal(h.runtime.select('1',1,'777'),false);h.state.tenant='777';h.runtime.cancel();assert.equal(h.runtime.select('1',1,'777'),false);
 });
+
+test('region batches may page after selection only with a fresh matching page receipt',async t=>{
+ const h=harness(t),f=normalizeInventoryFilters({loc:'C55'});h.runtime.search('1',f,'777');h.waiters[0].resolve(true);await h.settle();const returned=location.href;h.runtime.select('1',0,'777');h.state.card={name:row.name,sku:SKU};h.runtime.inspect();location.href=returned;
+ h.control.root.querySelector=selector=>selector.includes('pagination-next')?{disabled:false,click(){location.href=receipt(f,'2',2);}}:null;
+ assert.equal(h.runtime.page('2',1,'999'),false);assert.equal(h.runtime.page('2',1,'777'),true);h.waiters[1].resolve(true);await h.settle();assert.equal(h.runtime.inspect().status,'found');assert.equal(h.runtime.inspect().requestId,'2');
+});

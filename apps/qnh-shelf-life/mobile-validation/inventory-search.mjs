@@ -92,7 +92,7 @@ export function createInventorySearch({shell=readLoggedInQnhShell,tenant=readObs
       return {...state,authorized:true,authState:'authenticated',tenantId:id,productReady:Boolean(control),store:control?.root.querySelector('.wms-roo-picker-value-list')?.innerText.trim()||''};
     },
     search(requestId,raw,scope){let filters;try{filters=normalizeInventoryFilters(raw);}catch{return false;}return execute(requestId,filters,scope,1,c=>c.button.click(),true);},
-    page(requestId,direction,scope){if(state.status!=='found'&&state.status!=='not_found'||![-1,1].includes(direction)||!matches(scope)||location.href!==receipt)return false;
+    page(requestId,direction,scope){if(!['found','not_found','selected'].includes(state.status)||![-1,1].includes(direction)||!matches(scope)||location.href!==receipt)return false;
       const control=controls(),button=control?.root.querySelector('.wms-ant-pagination-'+(direction===1?'next':'prev')+' button');if(!button||button.disabled)return false;
       return execute(requestId,state.filters,scope,Number(queryOf(location.href).get('current'))+direction,()=>button.click(),false);
     },
