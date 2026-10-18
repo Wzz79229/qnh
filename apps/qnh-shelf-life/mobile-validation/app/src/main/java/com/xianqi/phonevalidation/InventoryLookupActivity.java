@@ -72,7 +72,7 @@ public final class InventoryLookupActivity extends QnhProtectedActivity {
     private void fail(String value){cancel();status.setText(value);}
     @Override protected void onAuthenticated(){qnh.inventory();}
     @Override protected void onSessionUnavailable(){cancel();if(stores!=null){stores.dismiss();stores=null;}}
-    @Override protected void onTenantChanged(){cancel();}
+    @Override protected void onTenantChanged(){changing=true;for(EditText field:fields())field.setText("");changing=false;cancel();}
     @Override public void onQnhMessage(String value){status.setText(value);}
     @Override protected void onAuthenticatedSnapshot(JSONObject value){
         productReady=value.optBoolean("productReady");if(queuedStores&&productReady){queuedStores=false;openStores();return;}

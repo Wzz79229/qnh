@@ -2,6 +2,7 @@ package com.xianqi.phonevalidation;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.os.Bundle;
 import android.view.View;
 import android.widget.FrameLayout;
 import org.json.JSONObject;
@@ -12,6 +13,7 @@ public abstract class QnhProtectedActivity extends Activity implements QnhConnec
     protected QnhConnection qnh;
     private boolean loginPending=false,resumed=false;
     private String tenant="";
+    @Override protected void onCreate(Bundle state){super.onCreate(state);if(state!=null){String value=state.getString("qnh-bound-tenant","");if(value.matches("[1-9][0-9]{0,19}"))tenant=value;}}
     @Override protected void onResume(){super.onResume();resumed=true;qnh=QnhConnection.get(this);qnh.listen(this);qnh.attach(this,(FrameLayout)findViewById(android.R.id.content),false);if(requireQnhAccess())onAuthenticated();}
     protected final boolean requireQnhAccess(){
         if(qnh==null)qnh=QnhConnection.get(this);
@@ -31,5 +33,6 @@ public abstract class QnhProtectedActivity extends Activity implements QnhConnec
     @Override public void onQnhMessage(String message){}
     @Override protected void onPause(){resumed=false;if(qnh!=null)qnh.unlisten(this);super.onPause();}
     @Override protected void onStop(){getWindow().getDecorView().setVisibility(View.INVISIBLE);super.onStop();}
+    @Override protected void onSaveInstanceState(Bundle state){state.putString("qnh-bound-tenant",tenant);super.onSaveInstanceState(state);}
     @Override public void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==LOGIN){loginPending=false;if(result!=RESULT_OK || !QnhConnection.get(this).verified())finishAffinity();}}
 }
