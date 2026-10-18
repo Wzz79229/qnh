@@ -1,7 +1,17 @@
-# 鲜期安卓手机连接验证版 0.1.0
+# 鲜期 Android
 
-下载 APK 安装到 Android 8 或更新的手机。打开后在官方牵牛花页面亲自登录，成功后自动进入查询界面，输入真实 SKU 验证名称、规格和商品图片。
+当前版本：[鲜期 0.2.0 APK](./xianqi-0.2.0.apk)，约 33.3 MB，Android 8 及以上。
 
-此版本的登录和查询在手机执行，不调用 Cloudflare Browser Run。扫码、拍照识别、GitHub 批次读写暂未接入。尚待真人登录和实机验收。
+先卸载旧的 0.1.0 临时签名验证版，再安装本版并重新登录牵牛花。0.1.0 尚未存储批次；0.2.0 起固定签名，后续同签名版本可覆盖升级。已有待同步批次时请勿卸载或清除应用数据。
 
-源码：apps/qnh-shelf-life/mobile-validation；构建源提交 d3c614b3980895d13ef9ef530b31b68ca84625f4；构建运行 https://github.com/Wzz79229/qnh/actions/runs/39059092370 。APK 已通过 Android 编译、lint 与签名验证；SHA256 见 SHA256SUMS.txt。
+本版包含：手机内牵牛花登录、扫描 SKU 即时查询商品、拍照在本机识别生产日期/保质期、自动计算到期日期、填写清点件数、加密本机草稿、云端连接与重试同步入口。包装照片只在内存识别，不保存、不上传。
+
+云端商品主图与批次功能需要管理员完成 Cloudflare D1 和私有 R2 绑定，并通过手机实际租户验证；未完成时只会保存本机草稿，明确显示待同步。当前已部署接口报告 configured:false，云端保存尚未开通。
+
+APK 已通过编译、Android lint 和 APK v2/v3 签名校验；新相机/OCR、云端会话核实仍需手机实测。校验值见 SHA256SUMS.txt。
+
+SHA-256：eb37430f95c97194a5e99b93e912c6f79b10f1df1367bd4616ed7d91485c5aee
+
+[云端配置步骤](https://github.com/Wzz79229/qnh/blob/main/apps/qnh-shelf-life/backend/MOBILE-CLOUD.md)
+
+旧版仅供兼容验证：[0.1.0](./xianqi-phone-validation-0.1.0.apk)。

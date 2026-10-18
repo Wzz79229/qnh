@@ -1,1 +1,2 @@
+eb37430f95c97194a5e99b93e912c6f79b10f1df1367bd4616ed7d91485c5aee  xianqi-0.2.0.apk
 d3cec60f2897e6ef2ae61feacf15f52b3924e59ac1509dacd42e0047fb9f5cdf  xianqi-phone-validation-0.1.0.apk
