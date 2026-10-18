@@ -141,9 +141,9 @@ jobs:
           adb shell settings put global animator_duration_scale 0
           adb install -r app/build/outputs/apk/debug/app-debug.apk
           adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-          # The unused emulator launcher may ANR during the first software-rendered boot.
-          # Stop it explicitly; keep app error dialogs enabled and verify screenshot focus.
-          adb shell am force-stop com.google.android.apps.nexuslauncher
+          # No launcher is needed for explicitly launched instrumentation activities.
+          # Disable only that emulator component; keep application error dialogs enabled.
+          adb shell pm disable-user --user 0 com.google.android.apps.nexuslauncher
           mkdir -p output/native-qa
           timeout 120 adb shell am instrument -w com.xianqi.phonevalidation.test/com.xianqi.phonevalidation.LabelInstrumentation | tee output/native-qa/portrait.log
           python -c "from pathlib import Path; assert 'CHECKS PASSED' in Path('output/native-qa/portrait.log').read_text()"
