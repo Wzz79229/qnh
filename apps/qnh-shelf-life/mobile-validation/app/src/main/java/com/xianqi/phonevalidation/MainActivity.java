@@ -2,6 +2,7 @@ package com.xianqi.phonevalidation;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -41,12 +42,20 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import javax.net.ssl.HttpsURLConnection;
 
-/** Device-only compatibility probe. No Worker browser, GitHub credential or privileged JS bridge. */
+/** Phone-owned QNH login, camera recognition and tenant-scoped batch management. */
 public final class MainActivity extends Activity {
     private static final String LOGIN_URL = "https://qnh.meituan.com/";
     private static final String PRODUCT_URL = LOGIN_URL + "#/unifiedGoods/tenant/spu-list";
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService images = Executors.newSingleThreadExecutor();
+    private final ExecutorService network = Executors.newSingleThreadExecutor();
+    private final CloudClient cloud = new CloudClient();
+    private int cloudGeneration = 0;
+    private boolean cloudBusy = false;
+    private TextView cloudStatus;
+    private Button cloudButton;
+    private LinearLayout cloudRows;
+    private AlertDialog cloudImageDialog;
     private WebView web, batchEngine;
     private boolean batchReady = false, resumeVerified = false, restoreWorkbench = false;
     private String batchRuntime = "", captureTenant = "", captureSku = "", pendingCapture = "", captureMode = "", productionText = "", shelfText = "";
@@ -128,8 +137,11 @@ public final class MainActivity extends Activity {
         batchPanel.addView(button("拍保质期", v -> openCapture("shelf")));
         dateSummary = label("拍清生产日期和保质期，程序自动计算到期日期。", 15); batchPanel.addView(dateSummary);
         quantityInput = new EditText(this); quantityInput.setSingleLine(true); quantityInput.setHint("清点件数"); quantityInput.setInputType(InputType.TYPE_CLASS_NUMBER); batchPanel.addView(quantityInput);
-        draftButton = button("暂存本机批次", v -> saveDraft()); batchPanel.addView(draftButton);
-        batchPanel.addView(label("云端连接完成前，批次先加密暂存在本机。包装照片不保存、不上传。", 13)); content.addView(batchPanel);
+        draftButton = button("保存批次", v -> saveDraft()); batchPanel.addView(draftButton);
+        batchPanel.addView(label("包装照片只在手机识别，不保存、不上传。保存时先加密暂存，连接云端后同步商品资料、商品主图和批次。", 13)); content.addView(batchPanel);
+        content.addView(label("云端同步", 18)); cloudStatus = label("连接后可同步当前租户的批次。", 13); content.addView(cloudStatus);
+        cloudButton = button("连接云端 / 同步批次", v -> requestCloud()); content.addView(cloudButton);
+        cloudRows = new LinearLayout(this); cloudRows.setOrientation(LinearLayout.VERTICAL); content.addView(cloudRows);
         content.addView(label("最近本机批次", 18)); draftList = label("", 14); content.addView(draftList);
         content.addView(button("清除本机牵牛花登录", v -> clearLogin()));
         workbench.addView(content); root.addView(workbench, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1));
@@ -268,6 +280,7 @@ public final class MainActivity extends Activity {
                     batchGeneration++; productionText = ""; shelfText = ""; currentDates = null; draftId = ""; quantityInput.setText("");
                     dateSummary.setText("已暂存当前批次。录入下一生产日期时请重新拍摄。"); draftButton.setEnabled(false);
                     status.setText("批次已加密暂存在本机，尚未同步云端。"); refreshDrafts();
+                    if (cloud.connected(tenant)) syncCloud();
                 } catch (Exception ignored) { draftButton.setEnabled(true); status.setText("本机批次保存未完成，请保留当前信息后重试。"); }
             });
         } catch (Exception ignored) { status.setText("批次信息不完整，请重新核对。"); }
@@ -281,11 +294,130 @@ public final class MainActivity extends Activity {
                 if (index > 0) summary.append("\n\n");
                 summary.append(product.getString("name")).append("\nSKU：").append(product.getString("sku"))
                     .append("\n生产：").append(row.getString("productionDate")).append(" · 到期：").append(row.getString("expiryDate"))
-                    .append("\n").append(row.getInt("quantity")).append(" 件 · 本机待同步");
+                    .append("\n").append(row.getInt("quantity")).append(" 件 · ").append("cloud".equals(row.optString("syncStatus")) ? "已同步云端" : "本机待同步");
             }
             draftList.setText(values.length() == 0 ? "当前租户暂无本机批次。" : summary.toString());
         } catch (Exception ignored) { draftList.setText("本机批次未能读取。请保留当前 App，避免卸载导致数据丢失。"); }
     }
+
+    private boolean cloudCurrent(String tenant, int generation) {
+        return generation == cloudGeneration && loggedIn && tenant.equals(tenantId) && !isFinishing() && !isDestroyed();
+    }
+    private String cloudMessage(Exception error) {
+        return error instanceof CloudClient.CloudError ? error.getMessage() : "云端连接未完成，批次仍保留在手机，请稍后重试。";
+    }
+    private void requestCloud() {
+        if (!loggedIn || !resumeVerified) { status.setText("请先完成牵牛花登录确认。"); return; }
+        if (cloudBusy) return;
+        if (cloud.connected(tenantId)) { syncCloud(); return; }
+        final String tenant = tenantId; final int generation = cloudGeneration;
+        cloudBusy = true; cloudButton.setEnabled(false); cloudStatus.setText("正在检查云端连接…");
+        network.submit(() -> {
+            try {
+                if (!cloud.configured()) throw new CloudClient.CloudError("MOBILE_SETUP_REQUIRED");
+                handler.post(() -> {
+                    if (!cloudCurrent(tenant, generation)) return;
+                    cloudBusy = false; cloudButton.setEnabled(true);
+                    if (!active || !resumeVerified) { cloudStatus.setText("请返回鲜期后再次连接云端。"); return; }
+                    if (getPreferences(MODE_PRIVATE).getBoolean("cloud-session-consent-v1", false)) connectCloud(tenant, generation);
+                    else new AlertDialog.Builder(this).setTitle("启用当前租户云端同步")
+                        .setMessage("为核实租户，鲜期会通过 HTTPS 将本机牵牛花登录会话临时发送到你的 Cloudflare 后台（qnh-shelf-life-api.w792294944.workers.dev），仅向牵牛花官方接口验证。后台不保存牵牛花会话、密码或验证码。商品名称、规格、SKU、主图和批次将保存在你的 Cloudflare 账号，供同租户成员查看。包装日期照片不会上传。")
+                        .setNegativeButton("暂不连接", (dialog, which) -> cloudStatus.setText("批次仅保留在手机，尚未同步。"))
+                        .setPositiveButton("同意并连接", (dialog, which) -> {
+                            getPreferences(MODE_PRIVATE).edit().putBoolean("cloud-session-consent-v1", true).apply();
+                            connectCloud(tenant, generation);
+                        }).show();
+                });
+            } catch (Exception error) { handler.post(() -> {
+                if (!cloudCurrent(tenant, generation)) return;
+                cloudBusy = false; cloudButton.setEnabled(true); cloudStatus.setText(cloudMessage(error));
+            }); }
+        });
+    }
+    private void connectCloud(String tenant, int generation) {
+        if (!cloudCurrent(tenant, generation) || !active || !resumeVerified || cloudBusy) return;
+        String session = CookieManager.getInstance().getCookie(LOGIN_URL);
+        if (session == null || session.length() < 8 || session.length() > 8192) { cloudStatus.setText("未能读取本机牵牛花登录状态，请重新登录后连接。"); return; }
+        cloudBusy = true; cloudButton.setEnabled(false); cloudStatus.setText("正在通过牵牛花核实当前租户…");
+        network.submit(() -> {
+            try {
+                cloud.connect(tenant, session);
+                handler.post(() -> {
+                    if (!cloudCurrent(tenant, generation)) return;
+                    cloudBusy = false; cloudButton.setEnabled(true); cloudStatus.setText("租户已核实，正在同步…"); syncCloud();
+                });
+            } catch (Exception error) { handler.post(() -> {
+                if (!cloudCurrent(tenant, generation)) return;
+                cloudBusy = false; cloudButton.setEnabled(true); cloudStatus.setText(cloudMessage(error));
+            }); }
+        });
+    }
+    private void syncCloud() {
+        if (!loggedIn || !resumeVerified || cloudBusy) return;
+        final String tenant = tenantId; final int generation = cloudGeneration;
+        if (!cloud.connected(tenant)) { cloudStatus.setText("请连接云端后同步本机批次。"); return; }
+        cloudBusy = true; cloudButton.setEnabled(false); cloudStatus.setText("正在同步商品资料、主图和批次…");
+        network.submit(() -> {
+            int uploaded = 0; JSONArray rows = null; Exception failure = null;
+            try {
+                JSONArray pending = drafts.pending(tenant);
+                for (int index = 0; index < pending.length(); index++) {
+                    if (!cloud.connected(tenant) || Thread.currentThread().isInterrupted()) throw new CloudClient.CloudError("MOBILE_AUTH_REQUIRED");
+                    JSONObject draft = pending.getJSONObject(index), saved = cloud.upload(tenant, draft);
+                    drafts.markSynced(tenant, draft.getString("id"), saved.getString("imagePath")); uploaded++;
+                }
+                rows = cloud.list(tenant);
+            } catch (Exception error) { failure = error; }
+            final int count = uploaded; final JSONArray resultRows = rows; final Exception error = failure;
+            handler.post(() -> {
+                if (!cloudCurrent(tenant, generation)) return;
+                cloudBusy = false; cloudButton.setEnabled(true); refreshDrafts();
+                cloudStatus.setText(error == null ? "当前租户云端已连接；本次同步 " + count + " 个批次。" : cloudMessage(error));
+                if (resultRows != null) renderCloudRows(resultRows, tenant, generation);
+            });
+        });
+    }
+    private String batchSummary(JSONObject row) throws Exception {
+        JSONObject product = row.getJSONObject("product"); String unit = row.getString("shelfUnit");
+        return product.getString("name") + "\n" + product.optString("spec") + "\nSKU：" + product.getString("sku")
+            + "\n生产：" + row.getString("productionDate") + " · 保质期：" + row.getInt("shelfLife") + ("month".equals(unit) ? "个月" : "year".equals(unit) ? "年" : "天")
+            + "\n到期：" + row.getString("expiryDate") + " · " + row.getInt("quantity") + " 件";
+    }
+    private void renderCloudRows(JSONArray rows, String tenant, int generation) {
+        cloudRows.removeAllViews(); cloudRows.addView(label("最近云端批次（最多 100 条）", 17));
+        if (rows.length() == 0) cloudRows.addView(label("当前租户暂无云端批次。", 14));
+        try { for (int index = 0; index < rows.length(); index++) {
+            JSONObject row = rows.getJSONObject(index); String summary = batchSummary(row), path = row.getString("imagePath");
+            cloudRows.addView(label(summary, 14)); cloudRows.addView(button("查看已归档商品主图", view -> showCloudImage(path, summary, tenant, generation)));
+        } } catch (Exception ignored) { cloudStatus.setText("部分云端批次未能显示，请重试同步。"); }
+    }
+    private void showCloudImage(String path, String summary, String tenant, int generation) {
+        if (!cloudCurrent(tenant, generation) || !resumeVerified) return;
+        cloudStatus.setText("正在读取当前租户的商品主图…");
+        network.submit(() -> {
+            Bitmap loaded = null;
+            try { loaded = decodeImage(cloud.image(tenant, path)); } catch (Exception ignored) { /* No provider bodies or credentials. */ }
+            final Bitmap bitmap = loaded;
+            handler.post(() -> {
+                if (!cloudCurrent(tenant, generation) || !active || !resumeVerified) { if (bitmap != null) bitmap.recycle(); return; }
+                if (bitmap == null) { cloudStatus.setText("商品主图未能读取，请重新连接后重试。"); return; }
+                ImageView preview = new ImageView(this); preview.setImageBitmap(bitmap); preview.setAdjustViewBounds(true); preview.setContentDescription(summary);
+                AlertDialog dialog = new AlertDialog.Builder(this).setTitle("云端商品主图").setView(preview).setPositiveButton("关闭", null).create();
+                cloudImageDialog = dialog;
+                dialog.setOnDismissListener(value -> { preview.setImageDrawable(null); bitmap.recycle(); if (cloudImageDialog == dialog) cloudImageDialog = null; }); dialog.show();
+                cloudStatus.setText("已从当前租户的云端批次读取商品主图。");
+            });
+        });
+    }
+    private static Bitmap decodeImage(byte[] bytes) throws Exception {
+        BitmapFactory.Options bounds = new BitmapFactory.Options(); bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0 || bounds.outWidth > 20000 || bounds.outHeight > 20000) throw new Exception();
+        BitmapFactory.Options options = new BitmapFactory.Options(); options.inSampleSize = 1;
+        while (Math.max(bounds.outWidth, bounds.outHeight) / options.inSampleSize > 1024) options.inSampleSize *= 2;
+        return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
+    }
+
     static boolean allowedTop(String value) {
         return QnhUrlPolicy.allowedTop(value);
     }
@@ -317,8 +449,8 @@ public final class MainActivity extends Activity {
         if (!tenantId.isEmpty() && !tenantId.equals(observed)) { failQuery(""); result.setText(""); image.setImageDrawable(null); image.setVisibility(View.GONE); }
         boolean entering = !loggedIn || !tenantId.equals(observed);
         tenantId = observed; loggedIn = true; returnButton.setEnabled(true); tenantLabel.setText("已登录牵牛花 · 租户 " + tenantId);
-        if (entering) { status.setText("牵牛花已登录，可以扫描 SKU 录入批次。"); refreshDrafts(); showWorkbench(); }
-        if (restoreWorkbench && pendingSku.isEmpty()) { restoreWorkbench = false; showWorkbench(); }
+        if (entering) { cloudStatus.setText("连接后可同步当前租户的批次。"); status.setText("牵牛花已登录，可以扫描 SKU 录入批次。"); refreshDrafts(); showWorkbench(); }
+        if (restoreWorkbench && pendingSku.isEmpty()) { restoreWorkbench = false; refreshDrafts(); showWorkbench(); }
         applyCapture();
         if (pendingSku.isEmpty()) return;
         if (!pendingTenant.equals(tenantId)) { failQuery("牵牛花租户已切换，请重新查询。"); return; }
@@ -338,7 +470,12 @@ public final class MainActivity extends Activity {
     private void lock() {
         boolean previouslyLoggedIn = loggedIn;
         loggedIn = false; tenantId = ""; candidate = ""; confirmations = 0;
-        resumeVerified = false; clearBatch(); pendingCapture = ""; captureTenant = "";
+        resumeVerified = false; cloudGeneration++; cloud.clear(); cloudBusy = false;
+        if (cloudImageDialog != null) { cloudImageDialog.dismiss(); cloudImageDialog = null; }
+        if (cloudRows != null) cloudRows.removeAllViews();
+        if (cloudStatus != null) cloudStatus.setText("请先登录牵牛花。");
+        if (cloudButton != null) cloudButton.setEnabled(true);
+        clearBatch(); pendingCapture = ""; captureTenant = "";
         if (draftList != null) draftList.setText("");
         if (returnButton == null) return;
         returnButton.setEnabled(false); failQuery(""); result.setText(""); image.setImageDrawable(null); image.setVisibility(View.GONE); imageStatus.setText("");
@@ -428,7 +565,7 @@ public final class MainActivity extends Activity {
         else super.onBackPressed();
     }
     @Override public void onDestroy() {
-        active = false; handler.removeCallbacksAndMessages(null); images.shutdownNow();
+        active = false; cloudGeneration++; cloud.clear(); if (cloudImageDialog != null) cloudImageDialog.dismiss(); handler.removeCallbacksAndMessages(null); images.shutdownNow(); network.shutdownNow();
         if (web != null) { web.stopLoading(); web.destroy(); web = null; }
         if (batchEngine != null) { batchEngine.destroy(); batchEngine = null; } if (drafts != null) drafts.close();
         super.onDestroy();

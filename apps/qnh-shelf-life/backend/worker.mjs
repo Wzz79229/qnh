@@ -5,6 +5,7 @@ import { QnhQueryQueue, QnhQueryError, QNH_QUERY_PATH } from './qnh-query.mjs';
 import { createGitHubAuthorization, validateGitHubAuthorization, GitHubAuthorizationError } from './github-app.mjs';
 import { createQnhPhoneRouter } from './qnh-phone-router.mjs';
 import { clearQnhPhoneCookie, QnhBrowserError } from './qnh-browser-session.mjs';
+import { createMobileCloud } from './mobile-cloud.mjs';
 export { QnhPhoneSession, QnhBrowserBudget } from './qnh-phone-router.mjs';
 
 // There is deliberately no client-supplied GitHub owner, repository, branch, or URL.
@@ -186,6 +187,7 @@ function gitHubStatus(response, payload, writing) {
 }
 
 export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.now(), cryptoImpl = globalThis.crypto } = {}) {
+  const mobile = createMobileCloud({ fetchImpl, now, cryptoImpl });
   const failures = new Map(); // Best-effort per-isolate throttling; not a global security boundary.
   const githubToken = createGitHubAuthorization({ fetchImpl, now, cryptoImpl });
   let authorizationProbe = null;
@@ -353,6 +355,7 @@ export function createWorker({ fetchImpl = globalThis.fetch, now = () => Date.no
         return rawEnv.ASSETS?.fetch ? rawEnv.ASSETS.fetch(request) : json(request, { code: 'NOT_FOUND', message: '未找到页面。' }, 404);
       }
       try {
+        if (url.pathname.startsWith('/api/mobile/')) return await mobile.handle(request, rawEnv);
         if (url.protocol !== 'https:') throw new ApiError(400, 'HTTPS_REQUIRED', '团队数据服务必须通过 HTTPS 访问。');
         const mutations = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
         const bridgeRoute = ['/api/qnh/bridge/claim', '/api/qnh/bridge/result'].includes(url.pathname);

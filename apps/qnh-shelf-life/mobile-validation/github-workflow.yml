@@ -48,7 +48,7 @@ jobs:
       - name: Verify phone query runtime
         run: |
           npm ci --ignore-scripts
-          node --test mobile-validation/tests/*.test.mjs tests/photo-parser.test.mjs tests/core.test.mjs
+          node --test mobile-validation/tests/*.test.mjs tests/photo-parser.test.mjs tests/core.test.mjs tests/mobile-cloud.test.mjs tests/backend.test.mjs tests/backend-phone-login.test.mjs
           node mobile-validation/build-runtime.mjs
       - name: Verify native URL boundaries
         run: |

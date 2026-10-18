@@ -22,7 +22,7 @@ final class DraftStore extends SQLiteOpenHelper {
     private static final String ALIAS = "xianqi-local-batches-v1";
     DraftStore(Context context) { super(context, "xianqi-drafts.db", null, 1); }
     @Override public void onCreate(SQLiteDatabase database) {
-        database.execSQL("CREATE TABLE drafts (tenant_key TEXT NOT NULL, batch_id TEXT NOT NULL, payload BLOB NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(tenant_key,batch_id))");
+        database.execSQL("CREATE TABLE drafts (tenant_key TEXT NOT NULL, batch_id TEXT NOT NULL, payload BLOB NOT NULL, created_at TEXT NOT NULL, sync_status TEXT NOT NULL DEFAULT 'local', PRIMARY KEY(tenant_key,batch_id))");
     }
     @Override public void onUpgrade(SQLiteDatabase database, int oldVersion, int newVersion) { throw new IllegalStateException("Migration required"); }
     private String tenantKey(String tenantId) throws Exception {
@@ -72,5 +72,21 @@ final class DraftStore extends SQLiteOpenHelper {
             while (cursor.moveToNext()) result.put(decrypt(cursor.getBlob(0), tenantId));
         }
         return result;
+    }
+    synchronized JSONArray pending(String tenantId) throws Exception {
+        JSONArray result = new JSONArray();
+        try (Cursor cursor = getReadableDatabase().query("drafts", new String[]{"payload"}, "tenant_key=? AND sync_status='local'", new String[]{tenantKey(tenantId)}, null, null, "created_at ASC", "100")) {
+            while (cursor.moveToNext()) result.put(decrypt(cursor.getBlob(0), tenantId));
+        } return result;
+    }
+    synchronized void markSynced(String tenantId, String id, String imagePath) throws Exception {
+        if (imagePath == null || !imagePath.matches("/api/mobile/images/[a-f0-9]{64}\\.(jpg|png|webp)")) throw new Exception();
+        String scope = tenantKey(tenantId);
+        try (Cursor cursor = getReadableDatabase().query("drafts", new String[]{"payload"}, "tenant_key=? AND batch_id=?", new String[]{scope, id}, null, null, null)) {
+            if (!cursor.moveToFirst()) throw new Exception(); JSONObject value = decrypt(cursor.getBlob(0), tenantId);
+            value.put("syncStatus", "cloud"); value.put("cloudImagePath", imagePath);
+            ContentValues update = new ContentValues(); update.put("payload", encrypt(value.toString(), tenantId)); update.put("sync_status", "cloud");
+            if (getWritableDatabase().update("drafts", update, "tenant_key=? AND batch_id=?", new String[]{scope, id}) != 1) throw new Exception();
+        }
     }
 }
