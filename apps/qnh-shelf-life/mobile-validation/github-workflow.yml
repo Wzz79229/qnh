@@ -141,6 +141,9 @@ jobs:
           adb shell settings put global animator_duration_scale 0
           adb install -r app/build/outputs/apk/debug/app-debug.apk
           adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+          # The unused emulator launcher may ANR during the first software-rendered boot.
+          # Stop it explicitly; keep app error dialogs enabled and verify screenshot focus.
+          adb shell am force-stop com.google.android.apps.nexuslauncher
           mkdir -p output/native-qa
           timeout 120 adb shell am instrument -w com.xianqi.phonevalidation.test/com.xianqi.phonevalidation.LabelInstrumentation | tee output/native-qa/portrait.log
           python -c "from pathlib import Path; assert 'CHECKS PASSED' in Path('output/native-qa/portrait.log').read_text()"
@@ -149,6 +152,7 @@ jobs:
           done
           adb shell wm size 1920x1200
           adb shell wm density 240
+          adb shell am force-stop com.google.android.apps.nexuslauncher
           timeout 120 adb shell am instrument -w -e wide true com.xianqi.phonevalidation.test/com.xianqi.phonevalidation.LabelInstrumentation | tee output/native-qa/wide.log
           python -c "from pathlib import Path; assert 'CHECKS PASSED' in Path('output/native-qa/wide.log').read_text()"
           adb exec-out run-as com.xianqi.phonevalidation cat files/workspace-wide.png > output/native-qa/workspace-wide.png
