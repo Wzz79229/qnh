@@ -43,6 +43,7 @@ public final class QnhConnection {
     private Activity owner;
     private String runtime="",lastInventory=INVENTORY;
     private int navigation=0;
+    private int restoreTicket=0;private boolean restoring=false;
     private boolean active=false,ready=false,probing=false,loaded=false,injected=false,loginVisible=false,inventoryInterest=false,pending=false,loginRequired=false;
     private long burstUntil=0;
     private final Runnable release=()->releaseBrowser();
@@ -94,14 +95,14 @@ public final class QnhConnection {
     }
     public void trimMemory(int level){if(!active&&(level==ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW||level==ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL||level>=ComponentCallbacks2.TRIM_MEMORY_BACKGROUND))releaseBrowser();}
     private void releaseBrowser(){if(active||web==null)return;WebView old=web;web=null;navigation++;ready=false;loaded=false;injected=false;probing=false;gate.clear();if(old.getParent() instanceof ViewGroup)((ViewGroup)old.getParent()).removeView(old);old.stopLoading();old.destroy();owner=null;context.setBaseContext(app);}
-    public void freshLogin(){ensureBrowser();gate.clear();ready=false;probing=false;loaded=true;injected=false;lastInventory=INVENTORY;web.loadUrl(INVENTORY);kick();}
+    public void freshLogin(){restoreTicket++;restoring=false;ensureBrowser();gate.clear();ready=false;probing=false;loaded=true;injected=false;lastInventory=INVENTORY;web.loadUrl(INVENTORY);kick();}
     public void loginPage(){ensureBrowser();if(!loaded){loaded=true;web.loadUrl(INVENTORY);}kick();}
     public boolean loginZoom(boolean larger){return loginVisible&&web!=null&&(larger?web.zoomIn():web.zoomOut());}
     public void signOut(Runnable done){gate.clear();loginRequired=true;ready=false;navigation++;probing=false;lastInventory=INVENTORY;if(web!=null)web.stopLoading();CookieManager.getInstance().removeAllCookies(ignored->{CookieManager.getInstance().flush();android.webkit.WebStorage.getInstance().deleteAllData();done.run();});}
-    public void inventory(){ensureBrowser();if(!loaded||!isInventory()){loaded=true;web.loadUrl(lastInventory);}kick();}
+    public void inventory(){restoreTicket++;restoring=false;ensureBrowser();if(!loaded||!isInventory()){loaded=true;web.loadUrl(lastInventory);}kick();}
     public boolean isInventory(){return web!=null&&isInventoryUrl(web.getUrl());}
     private static boolean isInventoryUrl(String value){try{android.net.Uri uri=android.net.Uri.parse(value);String fragment=uri.getFragment();return QnhUrlPolicy.qnhOrigin(value)&&fragment!=null&&fragment.startsWith("/co-wms/inventory-query-integration/list?")&&("&"+fragment.substring(fragment.indexOf('?')+1)+"&").contains("&tab=goodsBatch&");}catch(Exception ignored){return false;}}
-    public void restoreInventory(){if(!verified()||web==null||isInventory())return;android.webkit.WebBackForwardList history=web.copyBackForwardList();int index=history.getCurrentIndex();if(index>0&&lastInventory.equals(history.getItemAtIndex(index-1).getUrl()))web.goBack();else web.loadUrl(lastInventory);kick();}
+    public void restoreInventory(){if(!verified()||web==null)return;restoring=true;int ticket=++restoreTicket;String target=lastInventory;android.webkit.WebBackForwardList history=web.copyBackForwardList();int index=history.getCurrentIndex();if(!isInventory()){if(index>0&&target.equals(history.getItemAtIndex(index-1).getUrl()))web.goBack();else web.loadUrl(target);}kick();handler.postDelayed(()->{if(ticket!=restoreTicket||!restoring||web==null||!active||loginVisible)return;if(target.equals(web.getUrl()))web.reload();else{web.loadUrl(target);handler.postDelayed(()->{if(ticket==restoreTicket&&restoring&&web!=null&&active&&!loginVisible&&target.equals(web.getUrl()))web.reload();},500);}kick();},1500);}
     public void watchInventory(boolean value){inventoryInterest=value;kick();}
     private void kick(){if(!active)return;handler.removeCallbacks(tick);handler.post(tick);}
     private String prefix(){return injected?"":runtime+";";}
@@ -112,7 +113,7 @@ public final class QnhConnection {
     private static Object decode(String raw){try{if(raw==null||raw.length()>180000)return null;Object outer=new org.json.JSONTokener(raw).nextValue();return outer instanceof String?new org.json.JSONTokener((String)outer).nextValue():null;}catch(Exception ignored){return null;}}
     private void probe(){if(!active||!ready||probing||web==null||!QnhUrlPolicy.qnhOrigin(web.getUrl())||runtime.isEmpty())return;probing=true;int page=navigation;boolean details=inventoryInterest&&!loginVisible;
         web.evaluateJavascript(prefix()+"JSON.stringify(window.__kuguanInventory.inspect("+details+"));",raw->{if(page!=navigation||!active)return;probing=false;Object value=decode(raw);if(!(value instanceof JSONObject)){gate.clear();notifyLocked();return;}
-            injected=true;JSONObject snapshot=(JSONObject)value;loginRequired="login_required".equals(snapshot.optString("authState"));gate.observe(snapshot.optBoolean("authorized"),snapshot.optString("tenantId"));String phase=snapshot.optString("status");pending="pending".equals(phase)||"resolving".equals(phase);
+            injected=true;JSONObject snapshot=(JSONObject)value;loginRequired="login_required".equals(snapshot.optString("authState"));gate.observe(snapshot.optBoolean("authorized"),snapshot.optString("tenantId"));String phase=snapshot.optString("status");pending="pending".equals(phase)||"resolving".equals(phase);if(restoring&&snapshot.optBoolean("productReady")){restoring=false;restoreTicket++;}
             if(gate.verified()&&isInventory())lastInventory=web.getUrl();if(listener!=null)listener.onQnhSnapshot(snapshot);
         });
     }
