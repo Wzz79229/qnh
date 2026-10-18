@@ -98,14 +98,15 @@ public final class LocationLabelActivity extends Activity {
             @Override public void onLayout(PrintAttributes oldValue,PrintAttributes next,CancellationSignal cancellation,LayoutResultCallback callback,Bundle extras){ attributes=next; if(cancellation.isCanceled()) callback.onLayoutCancelled(); else callback.onLayoutFinished(new PrintDocumentInfo.Builder("库位标签.pdf").setContentType(PrintDocumentInfo.CONTENT_TYPE_DOCUMENT).setPageCount(1).build(),true); }
             @Override public void onWrite(PageRange[] pages,ParcelFileDescriptor output,CancellationSignal cancellation,WriteResultCallback callback){
                 boolean requested=false; for(PageRange p:pages) if(p.getStart()<=0 && p.getEnd()>=0) requested=true; if(!requested){ callback.onWriteFinished(new PageRange[0]); return; }
-                try(PrintedPdfDocument document=new PrintedPdfDocument(LocationLabelActivity.this,attributes); FileOutputStream stream=new FileOutputStream(output.getFileDescriptor())){
+                PrintedPdfDocument document=new PrintedPdfDocument(LocationLabelActivity.this,attributes);
+                try(FileOutputStream stream=new FileOutputStream(output.getFileDescriptor())){
                     if(cancellation.isCanceled()){ callback.onWriteCancelled(); return; } PdfDocument.Page page=document.startPage(0);
                     android.graphics.Rect area=page.getInfo().getContentRect(); float width=80*72/25.4f,height=60*72/25.4f;
                     if(area.width()+1<width || area.height()+1<height){ document.finishPage(page); callback.onWriteFailed("请在打印设置选择 80×60 毫米、无边距。"); return; }
                     float left=area.left+(area.width()-width)/2,top=area.top+(area.height()-height)/2;
                     page.getCanvas().drawBitmap(printing,null,new android.graphics.RectF(left,top,left+width,top+height),null); document.finishPage(page); document.writeTo(stream);
                     if(cancellation.isCanceled()) callback.onWriteCancelled(); else callback.onWriteFinished(new PageRange[]{new PageRange(0,0)});
-                }catch(Exception error){ callback.onWriteFailed("打印文件生成未完成，请重试。"); }
+                }catch(Exception error){ callback.onWriteFailed("打印文件生成未完成，请重试。"); }finally{ document.close(); }
             }
             @Override public void onFinish(){ printing.recycle(); }
         },new PrintAttributes.Builder().setMediaSize(new PrintAttributes.MediaSize("KUGUAN_80_60","80 × 60 毫米",3150,2362)).setResolution(new PrintAttributes.Resolution("label300","300 DPI",300,300)).setMinMargins(PrintAttributes.Margins.NO_MARGINS).setColorMode(PrintAttributes.COLOR_MODE_MONOCHROME).build());
