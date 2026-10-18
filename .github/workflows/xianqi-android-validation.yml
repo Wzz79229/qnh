@@ -146,6 +146,16 @@ jobs:
           # Disable only that emulator component; keep application error dialogs enabled.
           adb shell pm disable-user --user 0 com.google.android.apps.nexuslauncher
           mkdir -p output/native-qa
+          collect_qa() {
+            adb logcat -d -v threadtime > output/native-qa/logcat.txt 2>&1 || true
+            adb exec-out screencap -p > output/native-qa/last-screen.png 2>/dev/null || true
+            for file in label-native.png label-regression.png workspace-query.png workspace-label.png workspace-batch.png batch-001.png batch-002.png gallery-check.json labels-batch.pdf pdf-page-1.png pdf-page-2.png pdf-check.json; do
+              if adb shell run-as com.xianqi.phonevalidation test -f "files/$file"; then
+                adb exec-out run-as com.xianqi.phonevalidation cat "files/$file" > "output/native-qa/$file" || true
+              fi
+            done
+          }
+          trap collect_qa EXIT
           timeout 180 adb shell am instrument -w com.xianqi.phonevalidation.test/com.xianqi.phonevalidation.LabelInstrumentation | tee output/native-qa/portrait.log
           python -c "from pathlib import Path; assert 'CHECKS PASSED' in Path('output/native-qa/portrait.log').read_text()"
           for file in label-native.png label-regression.png workspace-query.png workspace-label.png workspace-batch.png batch-001.png batch-002.png gallery-check.json labels-batch.pdf pdf-page-1.png pdf-page-2.png pdf-check.json; do
