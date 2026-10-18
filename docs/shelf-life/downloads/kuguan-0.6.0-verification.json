@@ -1,0 +1,32 @@
+{
+  "version": "0.6.0",
+  "sourceCommit": "a5304b69a03dc2ce5eb558ee9cdec78a4518807a",
+  "release": {
+    "file": "kuguan-0.6.0.apk",
+    "size": 138492,
+    "sha256": "f0c4eca9ce55506af32168206e36d4ffb0fb7e20ddddc8132e9042cb9e183b77",
+    "unsignedSha256": "d5904be786dffb977ff4f19a3e86022e164127177b3f3190aaa1ba02c26c7fa2",
+    "signingCertificateSha256": "799dedd15fed804b5de65b785631561bd51b415afbde2e3074e60cd1f09e9c9a"
+  },
+  "ci": {
+    "runId": 39114628138,
+    "apkJob": 117637780563,
+    "nativeUiJob": 117638053266,
+    "conclusion": "success"
+  },
+  "checks": {
+    "scriptTests": 40,
+    "releaseUnitTests": "passed including TSPL headers, raster polarity and invalid job parameters",
+    "releaseBuild": "passed",
+    "androidLint": "passed",
+    "apkSignature": "passed v2/v3; previous certificate retained",
+    "nativeFlow": "controlled HTML, actual login/protected Activities, inventory queries and automatic preview passed",
+    "hiddenWebView": "alpha zero; requestAnimationFrame flow remained functional; hidden bringToFront refused",
+    "pixelPrivacy": "no magenta webpage pixels found with elevated background web layer or SSO page",
+    "ssoRedirect": "no automatic login Activity; explicit button opens usable login then returns transparent",
+    "printerRaster": "640x480, 8 dots/mm; full SKU decoded directly from TSPL BITMAP payload",
+    "exportRaster": "945x709, 300 DPI, full SKU decoded",
+    "physicalBluetoothPrinter": "not connected; pairing, SPP compatibility, actual print and quality require user test",
+    "realQnhBackendPhone": "not performed in this run"
+  }
+}
