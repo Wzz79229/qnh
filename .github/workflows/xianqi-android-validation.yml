@@ -122,8 +122,13 @@ jobs:
           set -euo pipefail
           mkdir -p build output/native-qa
           sudo chmod a+rw /dev/kvm
-          echo no | avdmanager create avd --force --name kuguan-qa --package 'system-images;android-35;google_apis;x86_64' --device pixel_6
-          "$ANDROID_HOME/emulator/emulator" @kuguan-qa -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048 > build/emulator.log 2>&1 &
+          kuguan_avd_root="$RUNNER_TEMP/kuguan-avd"
+          mkdir -p "$kuguan_avd_root"
+          echo no | ANDROID_AVD_HOME="$kuguan_avd_root" avdmanager create avd --force --name kuguan-qa --path "$kuguan_avd_root/kuguan-qa.avd" --package 'system-images;android-35;google_apis;x86_64' --device pixel_6
+          test -f "$kuguan_avd_root/kuguan-qa.avd/config.ini"
+          printf 'avd.ini.encoding=UTF-8\npath=%s/kuguan-qa.avd\ntarget=android-35\n' "$kuguan_avd_root" > "$kuguan_avd_root/kuguan-qa.ini"
+          ANDROID_AVD_HOME="$kuguan_avd_root" "$ANDROID_HOME/emulator/emulator" -list-avds
+          ANDROID_AVD_HOME="$kuguan_avd_root" "$ANDROID_HOME/emulator/emulator" @kuguan-qa -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048 > build/emulator.log 2>&1 &
           timeout 150 adb wait-for-device
           for attempt in $(seq 1 120); do
             if [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]; then break; fi
