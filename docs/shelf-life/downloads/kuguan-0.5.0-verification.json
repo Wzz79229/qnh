@@ -1,0 +1,39 @@
+{
+  "version": "0.5.0",
+  "sourceCommit": "590e026bab37f258e12c190883fa98ac0c7d9053",
+  "release": {
+    "file": "kuguan-0.5.0.apk",
+    "sha256": "197971f8230aa0922e9d349e4ef140ac171ab2368895871d7072a9f0a6510f97",
+    "size": 138691,
+    "signingCertificateSha256": "799dedd15fed804b5de65b785631561bd51b415afbde2e3074e60cd1f09e9c9a",
+    "unsignedApkSha256": "12268a877edc6ef1e36726e2dd329661b2489ddcdb5756f29165f907b9ab80ea"
+  },
+  "checks": {
+    "javaScriptUnitTests": "passed",
+    "releaseUnitTests": "passed",
+    "releaseBuild": "passed",
+    "androidLint": "passed",
+    "apkSignature": "passed",
+    "nativeBitmapAndBarcode": "passed",
+    "nativePng": {
+      "width": 945,
+      "height": 709,
+      "dpi": 300,
+      "pixels": "black and white"
+    },
+    "readOnlyResults": "passed",
+    "screenshots": "passed portrait and wide; visually reviewed, no system dialog",
+    "physicalPhonePerformance": "not measured"
+  },
+  "ciPreviousNativePass": {
+    "runId": 39109449239,
+    "note": "Bitmap, barcode, read-only checks passed; screenshot review found an emulator launcher dialog."
+  },
+  "ciFinal": {
+    "runId": 39110505645,
+    "apkJob": 117625452231,
+    "nativeUiJob": 117625716484,
+    "conclusion": "success",
+    "sourceCommit": "590e026bab37f258e12c190883fa98ac0c7d9053"
+  }
+}
