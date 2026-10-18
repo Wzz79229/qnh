@@ -31,7 +31,7 @@ import java.io.FileOutputStream;
 import java.io.OutputStream;
 
 /** Creates one image per label; no automatic upload or implicit printing. */
-public final class LocationLabelActivity extends Activity {
+public final class LocationLabelActivity extends QnhProtectedActivity {
     private EditText name,spec,sku,location;
     private TextView status;
     private ImageView preview;
@@ -69,6 +69,7 @@ public final class LocationLabelActivity extends Activity {
     private void setActions(boolean enabled) { save.setEnabled(enabled); share.setEnabled(enabled); print.setEnabled(enabled); }
     private void invalidateImage() { revision++; png=null; rendered=null; preview.setImageDrawable(null); if(bitmap!=null) { bitmap.recycle(); bitmap=null; } setActions(false); status.setText("内容已修改，请重新生成标签图片。"); }
     private void generate() {
+        if(!requireQnhAccess())return;
         invalidateImage();
         try { LabelContent value=LabelContent.create(name.getText().toString(),spec.getText().toString(),sku.getText().toString(),location.getText().toString());
             Bitmap next=LocationLabelRenderer.render(value); byte[] encoded;
@@ -78,10 +79,12 @@ public final class LocationLabelActivity extends Activity {
         } catch(IllegalArgumentException error) { status.setText(error.getMessage()); } catch(Exception error) { status.setText("图片生成未完成，请核对内容后重试。"); }
     }
     private void saveImage() {
+        if(!requireQnhAccess())return;
         if(png==null || rendered==null) return; savingBytes=png.clone(); Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT); intent.addCategory(Intent.CATEGORY_OPENABLE); intent.setType("image/png"); intent.putExtra(Intent.EXTRA_TITLE,rendered.fileName());
         try { startActivityForResult(intent,41); } catch(Exception error) { savingBytes=null; status.setText("未找到文件保存程序，可使用分享图片。"); }
     }
     private void shareImage() {
+        if(!requireQnhAccess())return;
         if(png==null || rendered==null) return;
         try { File folder=new File(getCacheDir(),"labels"); if(!folder.exists() && !folder.mkdirs()) throw new Exception();
             // Each shared image is immutable, so another share cannot change the recipient's pending file.
@@ -91,6 +94,7 @@ public final class LocationLabelActivity extends Activity {
         } catch(Exception error) { status.setText("图片分享未完成，请使用保存 PNG 图片。"); }
     }
     private void printImage() {
+        if(!requireQnhAccess())return;
         if(bitmap==null || rendered==null) return; final Bitmap printing=bitmap.copy(Bitmap.Config.ARGB_8888,false); final String title=rendered.location;
         PrintManager manager=(PrintManager)getSystemService(PRINT_SERVICE); if(manager==null) { printing.recycle(); status.setText("当前手机没有系统打印服务，请保存图片后用打印软件打开。"); return; }
         manager.print("库位标签 "+title,new PrintDocumentAdapter(){
@@ -116,5 +120,6 @@ public final class LocationLabelActivity extends Activity {
         if(request==40 && result==RESULT_OK && data!=null){ name.setText(data.getStringExtra("name")); spec.setText(data.getStringExtra("spec")); sku.setText(data.getStringExtra("sku")); location.setText(data.getStringExtra("loc")); status.setText("已填入本次库存查询结果，请核对库位后生成图片。"); }
     }
     @Override protected void onSaveInstanceState(Bundle out){ out.putString("name",name.getText().toString()); out.putString("spec",spec.getText().toString()); out.putString("sku",sku.getText().toString()); out.putString("location",location.getText().toString()); super.onSaveInstanceState(out); }
+    @Override protected void onTenantChanged(){name.setText("");spec.setText("");sku.setText("");location.setText("");invalidateImage();status.setText("牵牛花租户已切换，请重新选择商品和库位。");}
     @Override public void onDestroy(){ preview.setImageDrawable(null); if(bitmap!=null) bitmap.recycle(); png=null; savingBytes=null; super.onDestroy(); }
 }

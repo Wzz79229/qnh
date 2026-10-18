@@ -54,7 +54,7 @@ export function normalizeInventoryRows(snapshot, sku) {
   }
   return [...unique.values()];
 }
-function observeInventory(control) {
+export function observeInventory(control) {
   let done, quiet, timer, closed = false;
   const loading = () => Array.from(control.root.querySelectorAll('[class]')).some(e => visible(e) && /(?:spin-spinning|anticon-loading|anticon-spin)/u.test(e.className || ''));
   const promise = new Promise(resolve => { done = ok => { if (closed) return; closed = true; observer.disconnect(); clearTimeout(quiet); clearTimeout(timer); resolve(ok); }; });

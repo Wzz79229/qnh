@@ -66,13 +66,13 @@ jobs:
           javac -cp "$core_jar" -d build/label-png-check tests/LabelPngTest.java
           java -Djava.awt.headless=true -cp "$core_jar:build/label-png-check" com.xianqi.phonevalidation.LabelPngTest app/src/test/resources/label-example.png
           mkdir -p output
-          cp app/build/outputs/apk/release/app-release-unsigned.apk output/kuguan-0.3.0-unsigned.apk
+          cp app/build/outputs/apk/release/app-release-unsigned.apk output/kuguan-0.4.0-unsigned.apk
           cp "$ANDROID_HOME/build-tools/34.0.0/lib/apksigner.jar" output/apksigner.jar
           cd output
           sha256sum *.apk *.jar > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: kuguan-android-0.3.0-unsigned
+          name: kuguan-android-0.4.0-unsigned
           path: |
             apps/qnh-shelf-life/mobile-validation/output/*.apk
             apps/qnh-shelf-life/mobile-validation/output/*.jar
