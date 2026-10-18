@@ -24,7 +24,7 @@ public final class InventoryLookupActivity extends QnhProtectedActivity {
     private NameInput name;private EditText sku,location,barcode,external;
     private TextView status,scope;private LinearLayout results,extra;private Button query,previous,next;
     private JSONArray rows=new JSONArray();private String request="",displayed="";
-    private int serial=0,storeDepth=0;private boolean changing=false,queued=false,busy=false;
+    private int serial=0,storeDepth=0;private boolean changing=false,queued=false,busy=false,queuedStores=false,productReady=false;
     private AlertDialog stores;
     private final Handler handler=new Handler(Looper.getMainLooper());
     private final Runnable autocomplete=()->search();
@@ -61,9 +61,9 @@ public final class InventoryLookupActivity extends QnhProtectedActivity {
     }
     private EditText[] fields(){return new EditText[]{name,sku,location,barcode,external};}
     private JSONObject filters(){JSONObject f=new JSONObject();try{f.put("name",name.getText().toString().trim());f.put("sku",sku.getText().toString().trim());f.put("loc",location.getText().toString().trim());f.put("barcode",barcode.getText().toString().trim());f.put("external",external.getText().toString().trim());}catch(Exception ignored){}return f;}
-    private void cancel(){serial++;request="";displayed="";queued=false;busy=false;handler.removeCallbacks(autocomplete);if(name!=null){name.dismissDropDown();name.setAdapter(new ArrayAdapter<String>(this,android.R.layout.simple_dropdown_item_1line,new String[0]));}rows=new JSONArray();if(results!=null)results.removeAllViews();if(query!=null)query.setEnabled(true);if(previous!=null)previous.setEnabled(false);if(next!=null)next.setEnabled(false);if(qnh!=null)qnh.command("window.__kuguanInventory.cancel()",null);}
+    private void cancel(){serial++;request="";displayed="";queued=false;queuedStores=false;busy=false;handler.removeCallbacks(autocomplete);if(name!=null){name.dismissDropDown();name.setAdapter(new ArrayAdapter<String>(this,R.layout.inventory_suggestion,new String[0]));}rows=new JSONArray();if(results!=null)results.removeAllViews();if(query!=null)query.setEnabled(true);if(previous!=null)previous.setEnabled(false);if(next!=null)next.setEnabled(false);if(qnh!=null)qnh.command("window.__kuguanInventory.cancel()",null);}
     private void search(){handler.removeCallbacks(autocomplete);if(!requireQnhAccess())return;JSONObject f=filters();boolean any=false;for(String k:new String[]{"name","sku","loc","barcode","external"})any|=!f.optString(k).isEmpty();if(!any){status.setText("请填写至少一个查询条件。");return;}
-        cancel();queued=true;busy=true;query.setEnabled(false);status.setText("正在按条件查询库存…");qnh.inventory();
+        cancel();queued=true;busy=true;query.setEnabled(false);status.setText("正在按条件查询库存…");qnh.inventory();int waiting=serial;handler.postDelayed(()->{if(queued&&serial==waiting)fail("库存页面未准备好，请检查网络和牵牛花库存查询权限后重试。");},30000);
     }
     private void runQuery(){if(!queued)return;queued=false;request=String.valueOf(++serial);String current=request;
         qnh.command("window.__kuguanInventory.search("+JSONObject.quote(current)+","+filters().toString()+","+JSONObject.quote(qnh.tenant())+")",ok->{if(current.equals(request)&&!Boolean.TRUE.equals(ok))fail("查询条件未被接受。库位最多四段、每段六个字符；SKU 请填写完整编码。");});
@@ -75,6 +75,7 @@ public final class InventoryLookupActivity extends QnhProtectedActivity {
     @Override protected void onTenantChanged(){cancel();}
     @Override public void onQnhMessage(String value){status.setText(value);}
     @Override protected void onAuthenticatedSnapshot(JSONObject value){
+        productReady=value.optBoolean("productReady");if(queuedStores&&productReady){queuedStores=false;openStores();return;}
         String store=value.optString("store");if(!store.isEmpty())scope.setText("库存查询（新） · "+store);
         if(queued&&value.optBoolean("productReady")){runQuery();return;}
         if(request.isEmpty()||!request.equals(value.optString("requestId")))return;
@@ -88,7 +89,7 @@ public final class InventoryLookupActivity extends QnhProtectedActivity {
         rows=value.optJSONArray("rows");if(rows==null)rows=new JSONArray();results.removeAllViews();String[] suggestions=new String[rows.length()];
         for(int i=0;i<rows.length();i++){JSONObject row=rows.optJSONObject(i);if(row==null){fail("库存记录不完整，请重试。");return;}String title=row.optString("name")+"\n"+row.optString("spec")+"\n"+row.optString("store")+" · 库位："+(row.optString("loc").isEmpty()?"未设置":row.optString("loc"));suggestions[i]=title;final int index=i;results.addView(button(title,v->select(index)));}
         status.setText(rows.length()==0?"没有符合条件的库存记录，请调整名称、库位或门店范围。":"请选择需要打印的商品与库位（本页 "+rows.length()+" 条）。");
-        name.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_dropdown_item_1line,suggestions));if(name.hasFocus()&&rows.length()>0)name.showDropDown();
+        name.setAdapter(new ArrayAdapter<>(this,R.layout.inventory_suggestion,suggestions));if(name.hasFocus()&&rows.length()>0)name.showDropDown();
     }
     private void select(int index){if(!requireQnhAccess()||busy||request.isEmpty()||index<0||index>=rows.length())return;handler.removeCallbacks(autocomplete);name.dismissDropDown();busy=true;query.setEnabled(false);String current=request;
         qnh.command("window.__kuguanInventory.select("+JSONObject.quote(current)+","+index+","+JSONObject.quote(qnh.tenant())+")",ok->{if(current.equals(request)&&!Boolean.TRUE.equals(ok))fail("库存结果已经变化，请重新查询后选择。");});
@@ -98,7 +99,7 @@ public final class InventoryLookupActivity extends QnhProtectedActivity {
         qnh.command("window.__kuguanInventory.page("+JSONObject.quote(current)+","+direction+","+JSONObject.quote(qnh.tenant())+")",ok->{if(current.equals(request)&&!Boolean.TRUE.equals(ok))fail("翻页结果未确认，请重新查询。");});
         handler.postDelayed(()->{if(current.equals(request)&&busy)fail("翻页超时，请重新查询。");},20000);
     }
-    private void openStores(){if(!requireQnhAccess())return;cancel();storeDepth=0;qnh.command("window.__kuguanInventory.openStores()",ok->{if(Boolean.TRUE.equals(ok))loadStores(0);else status.setText("门店选项尚未准备好，请稍后重试。");});}
+    private void openStores(){if(!requireQnhAccess())return;cancel();storeDepth=0;if(!productReady||!qnh.isInventory()){queuedStores=true;status.setText("正在加载可选门店 / 仓…");qnh.inventory();int waiting=serial;handler.postDelayed(()->{if(queuedStores&&serial==waiting)fail("门店列表加载超时，请检查网络和库存权限。");},20000);return;}qnh.command("window.__kuguanInventory.openStores()",ok->{if(Boolean.TRUE.equals(ok))loadStores(0);else status.setText("门店选项尚未准备好，请稍后重试。");});}
     private void loadStores(int attempt){if(isFinishing())return;qnh.command("window.__kuguanInventory.stores()",result->{if(!(result instanceof JSONArray)){status.setText("门店列表暂时不可用。");return;}JSONArray columns=(JSONArray)result;
         if(columns.length()<=storeDepth){if(attempt<15){handler.postDelayed(()->loadStores(attempt+1),400);return;}storeDepth=Math.max(0,columns.length()-1);}
         JSONObject column=columns.optJSONObject(storeDepth);JSONArray options=column==null?null:column.optJSONArray("options");if(options==null||options.length()==0){status.setText("暂无可选门店，请确认牵牛花库存权限。");return;}
