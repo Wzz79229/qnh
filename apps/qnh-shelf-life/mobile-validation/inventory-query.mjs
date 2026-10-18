@@ -1,11 +1,14 @@
 import { readLoggedInQnhShell, readObservedQnhTenantId } from '../backend/qnh-browser-session.mjs';
 
 export const INVENTORY_HASH = '#/co-wms/inventory-query-integration/list';
+export const LEGACY_INVENTORY_HASH = '#/co-wms/non-erp/stock-query';
+export const LEGACY_INVENTORY_URL = `https://qnh.meituan.com/home.html${LEGACY_INVENTORY_HASH}?tab=list&pageSize=50`;
+export function legacyInventoryPage(href){try{const u=new URL(href),[path,query='']=u.hash.split('?'),tab=new URLSearchParams(query).get('tab');return u.origin==='https://qnh.meituan.com'&&['/','/home.html'].includes(u.pathname)&&path===LEGACY_INVENTORY_HASH&&(!tab||tab==='list');}catch{return false;}}
 export const INVENTORY_URL = `https://qnh.meituan.com/${INVENTORY_HASH}?tab=goodsBatch`;
 const visible = e => e && e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden';
 export function inventoryPage(href) {
   try { const u = new URL(href), [path, query = ''] = u.hash.split('?');
-    return u.origin === 'https://qnh.meituan.com' && ['/', '/home.html'].includes(u.pathname)
+    return legacyInventoryPage(href) || u.origin === 'https://qnh.meituan.com' && ['/', '/home.html'].includes(u.pathname)
       && path === INVENTORY_HASH && new URLSearchParams(query).get('tab') === 'goodsBatch';
   } catch { return false; }
 }

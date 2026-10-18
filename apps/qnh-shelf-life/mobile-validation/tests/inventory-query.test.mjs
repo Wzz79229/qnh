@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
-import { INVENTORY_URL, inventoryPage, exactInventoryReceipt, normalizeInventoryRows, createInventoryRuntime } from '../inventory-query.mjs';
+import { INVENTORY_URL, LEGACY_INVENTORY_URL, legacyInventoryPage, inventoryPage, exactInventoryReceipt, normalizeInventoryRows, createInventoryRuntime } from '../inventory-query.mjs';
 const SKU='2110000000000123456';
 const receipt=(sku=SKU,t='2')=>`${INVENTORY_URL}&skuIdListStr=${sku}&_t=${t}&current=1`;
 const row={name:'合成测试商品',spec:'500ml/瓶',loc:'C56-2-2',store:'合成测试仓'};
-test('only the new inventory product-stock tab is a lookup entry',()=>{
-  assert.ok(inventoryPage(INVENTORY_URL));
+test('only the observed legacy and new product-stock inventory tabs are lookup entries',()=>{
+  assert.ok(inventoryPage(INVENTORY_URL));assert.ok(inventoryPage(LEGACY_INVENTORY_URL));assert.ok(legacyInventoryPage(LEGACY_INVENTORY_URL));assert.ok(legacyInventoryPage(LEGACY_INVENTORY_URL.split('?')[0]));assert.equal(inventoryPage(LEGACY_INVENTORY_URL.replace('tab=list','tab=location')),false);
   for(const url of ['https://qnh.meituan.com/#/unifiedGoods/tenant/spu-list',INVENTORY_URL.replace('goodsBatch','goods'),INVENTORY_URL.replace('qnh.meituan.com','attacker.invalid')])assert.equal(inventoryPage(url),false);
 });
 test('receipt requires a new official query timestamp and one exact full SKU filter',()=>{

@@ -5,7 +5,6 @@ import android.content.ClipData;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -20,84 +19,56 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** Read-only product queries, single or multiple PNGs, and gallery export. */
+/** Query results automatically prepend to a tenant-scoped vertical label list. */
 public final class LocationLabelActivity extends QnhProtectedActivity implements InventorySearchPanel.Host {
-    private LabelWorkspace ui;
-    private final LabelRenderState selection=new LabelRenderState();
-    private final ExecutorService renderer=Executors.newSingleThreadExecutor();
-    private final AtomicLong outputFence=new AtomicLong();
-    private Future<?> renderJob;
-    private Bitmap bitmap;
-    private LabelBatch batch,sharedBatch;private List<File> sharedFiles;
-    private int page=0,pageRequest=0;
-    private boolean destroyed=false,exporting=false;
-    private JSONArray selectedRows,restored;
-    private String restoredTenant="";
-    private LabelBatch permissionBatch;
-    private long permissionTicket;
+    private LabelWorkspace ui;private final LabelRenderState selection=new LabelRenderState();
+    private final ExecutorService renderer=Executors.newSingleThreadExecutor();private final AtomicLong outputFence=new AtomicLong();private Future<?> renderJob;
+    private LabelQueue queue=new LabelQueue();private LabelBatch batch,sharedBatch;private List<File> sharedFiles;
+    private boolean destroyed=false,exporting=false;private JSONArray restored;private String restoredTenant="";
+    private LabelBatch permissionBatch;private long permissionTicket;
     private String scannerTenant="",scanValue,scanFormat;
     private LabelBatch pdfBatch;private long pdfTicket;private Uri pdfTarget;
-
     @Override public void onCreate(Bundle state){super.onCreate(state);
-        ui=new LabelWorkspace(this,this,state,new LabelWorkspace.Actions(){
-            public void back(){finish();}public void save(){saveImages();}public void share(){shareImages();}
-            public void pdf(){savePdf();}
-            public void previous(){showPage(page-1);}public void next(){showPage(page+1);}
-        });setContentView(ui);
-        if(state!=null)try{scannerTenant=state.getString("scanner-tenant","");String raw=state.getString("selected-rows","");if(!raw.isEmpty()&&raw.length()<200000){restored=new JSONArray(raw);restoredTenant=state.getString("selected-tenant","");}}catch(Exception ignored){}
+        ui=new LabelWorkspace(this,this,state,new LabelWorkspace.Actions(){public void back(){finish();}public void save(){saveImages();}public void share(){shareImages();}public void pdf(){savePdf();}public void remove(long id){removeLabel(id);}public void clear(){clearLabels();}});setContentView(ui);
+        Object retained=getLastNonConfigurationInstance();if(retained instanceof LabelQueue)queue=(LabelQueue)retained;
+        if(state!=null)try{scannerTenant=state.getString("scanner-tenant","");String raw=state.getString("generated-rows","");if(!raw.isEmpty()&&raw.length()<200000){restored=new JSONArray(raw);restoredTenant=state.getString("generated-tenant","");}}catch(Exception ignored){}
     }
     @Override public boolean allowSearch(){return requireQnhAccess();}
     @Override public boolean active(){return isQnhScreenActive();}
-    @Override public void onQueryChanged(){clearSelection();}
+    @Override public void onQueryChanged(){cancelPending();}
     @Override public void onSelected(JSONObject row){onBatchSelected(new JSONArray().put(row));}
-    @Override public void onBatchSelected(JSONArray rows){if(requireQnhAccess())renderRows(rows,true);}
+    @Override public void onBatchSelected(JSONArray rows){if(requireQnhAccess())renderRows(rows,true,false);}
+    @Override public void onLocationBatchSelected(JSONArray rows){if(requireQnhAccess())renderRows(rows,true,true);}
     @Override public void onScan(){if(requireQnhAccess()){scannerTenant=qnh.tenant();startActivityForResult(new Intent(this,BarcodeScanActivity.class),62);}}
     private void consumeScan(){if(scanValue==null)return;String value=scanValue,format=scanFormat;scanValue=null;if(scannerTenant.equals(qnh.tenant()))ui.search.scanned(value,format);else ui.search.message("登录租户已改变，请重新扫码。");}
-    private void clearSelection(){outputFence.incrementAndGet();pageRequest++;selection.clear();restored=null;selectedRows=null;batch=null;sharedBatch=null;sharedFiles=null;page=0;permissionBatch=null;pdfBatch=null;pdfTarget=null;exporting=false;if(renderJob!=null)renderJob.cancel(false);ui.clear();releaseBitmap();}
-    private void releaseBitmap(){ui.preview.setImageDrawable(null);if(bitmap!=null&&!bitmap.isRecycled())bitmap.recycle();bitmap=null;}
+    @Override public Object onRetainNonConfigurationInstance(){return queue;}
+    private void cancelPending(){outputFence.incrementAndGet();restored=null;sharedBatch=null;sharedFiles=null;permissionBatch=null;pdfBatch=null;pdfTarget=null;exporting=false;if(renderJob!=null)renderJob.cancel(false);ui.setActions(batch!=null);}
+    private void refreshLabels(){batch=queue.size()==0?null:queue.snapshot(qnh.tenant());selection.clear();if(batch!=null){LabelContent first=batch.get(0).content;selection.select(batch.tenant,first.name,first.spec,first.sku,first.location);}ui.showLabels(queue.items());ui.setActions(batch!=null&&!exporting);}
+    private void clearLabels(){if(!requireQnhAccess())return;ui.search.cancelQuery();cancelPending();queue.clear();refreshLabels();}
+    private void removeLabel(long id){if(!requireQnhAccess()||queue.size()==0||!queue.tenant().equals(qnh.tenant()))return;cancelPending();if(queue.remove(id,qnh.tenant())){refreshLabels();ui.message(queue.size()==0?"标签已清空。":"已删除该标签，剩余 "+queue.size()+" 张。");}}
+    private void resetLabels(){cancelPending();queue.clear();batch=null;selection.clear();ui.showLabels(queue.items());}
     private boolean current(long ticket,String tenant){return !destroyed&&outputFence.get()==ticket&&batch!=null&&batch.tenant.equals(tenant);}
-    private void renderRows(JSONArray rows,boolean reveal){
-        clearSelection();
+    private boolean pending(long ticket,String tenant){return !destroyed&&outputFence.get()==ticket;}
+    private void renderRows(JSONArray rows,boolean reveal,boolean sortLocations){cancelPending();
         try{
-            if(rows==null||rows.length()<1||rows.length()>LabelBatch.MAX_ITEMS)throw new IllegalArgumentException("每批最多500张，请按更细库位分批查询。");
-            List<LabelContent> contents=new ArrayList<>();List<String> stores=new ArrayList<>();JSONArray normalized=new JSONArray();
-            for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);String sku=row.getString("sku"),loc=row.optString("loc");
-                if(!sku.matches("[A-Za-z0-9._-]{1,64}"))throw new IllegalArgumentException("完整 SKU 尚未核实，请重新查询。");
-                if(loc.isEmpty()||loc.contains("\n"))throw new IllegalArgumentException("所选第"+(i+1)+"条记录没有单一库位，请重新选择。");
-                LabelContent data=LabelContent.create(row.getString("name"),row.optString("spec"),sku,loc);String store=row.optString("store");if(store.length()>300)throw new IllegalArgumentException("门店资料不完整。");
-                contents.add(data);stores.add(store);normalized.put(new JSONObject().put("name",data.name).put("spec",data.spec).put("sku",data.sku).put("loc",data.location).put("store",store));
-            }
-            String tenant=qnh.tenant();LabelContent first=contents.get(0);selection.select(tenant,first.name,first.spec,first.sku,first.location);selectedRows=normalized;long ticket=outputFence.get();
-            ui.showRecord(first,stores.get(0));ui.rendering(0,contents.size());if(reveal)ui.revealResult();
-            renderJob=renderer.submit(()->{
-                Bitmap firstImage=null;
-                try{List<LabelBatch.Entry> entries=new ArrayList<>();long imageBytes=0;
-                    for(int i=0;i<contents.size();i++){
-                        if(outputFence.get()!=ticket||Thread.currentThread().isInterrupted())throw new java.util.concurrent.CancellationException();
-                        Bitmap image=LocationLabelRenderer.render(contents.get(i));
-                        try{byte[] encoded=LocationLabelRenderer.png(image);imageBytes+=encoded.length;if(imageBytes>16*1024*1024)throw new IllegalArgumentException("本批图片过大，请按更细库位分批生成。");entries.add(new LabelBatch.Entry(contents.get(i),stores.get(i),encoded));if(i==0){firstImage=image;image=null;}}finally{if(image!=null)image.recycle();}
-                        final int done=i+1;runOnUiThread(()->{if(!destroyed&&outputFence.get()==ticket)ui.rendering(done,contents.size());});
-                    }
-                    LabelBatch result=new LabelBatch(tenant,entries);Bitmap image=firstImage;firstImage=null;
-                    runOnUiThread(()->{if(destroyed||outputFence.get()!=ticket){image.recycle();return;}batch=result;page=0;bitmap=image;ui.showPage(image,0,result.size());ui.search.message(result.size()>1?"已生成 "+result.size()+" 张标签，可一键保存全部图片或批量分享。":"标签已生成，可保存或分享。");});
-                }catch(Exception error){if(firstImage!=null)firstImage.recycle();String message=error instanceof IllegalArgumentException?error.getMessage():"图片生成未完成，请重新查询后重试。";runOnUiThread(()->{if(!destroyed&&outputFence.get()==ticket)ui.failed(message);});}
-            });
+            if(rows==null||rows.length()<1||rows.length()>LabelBatch.MAX_ITEMS||queue.size()+rows.length()>LabelBatch.MAX_ITEMS)throw new IllegalArgumentException("最多保留500张标签，请保存后清空部分标签。");
+            List<LabelContent> contents=new ArrayList<>();List<String> stores=new ArrayList<>();
+            for(int i=0;i<rows.length();i++){JSONObject row=rows.getJSONObject(i);String sku=row.getString("sku"),loc=row.optString("loc");if(!sku.matches("[A-Za-z0-9._-]{1,64}"))throw new IllegalArgumentException("完整 SKU 尚未核实，请重新查询。");if(loc.isEmpty()||loc.contains("\n"))throw new IllegalArgumentException("所选第"+(i+1)+"条记录没有单一库位，请重新选择。");LabelContent data=LabelContent.create(row.getString("name"),row.optString("spec"),sku,loc);String store=row.optString("store");if(store.length()>300)throw new IllegalArgumentException("门店资料不完整。");contents.add(data);stores.add(store);}
+            String tenant=qnh.tenant();long ticket=outputFence.get();ui.rendering(0,contents.size());
+            renderJob=renderer.submit(()->{try{List<LabelBatch.Entry> entries=new ArrayList<>();long bytes=0;for(int i=0;i<contents.size();i++){if(outputFence.get()!=ticket||Thread.currentThread().isInterrupted())return;Bitmap image=LocationLabelRenderer.render(contents.get(i));try{byte[] png=LocationLabelRenderer.png(image);bytes+=png.length;if(bytes>16*1024*1024)throw new IllegalArgumentException("本批图片过大，请减少所选商品。");entries.add(new LabelBatch.Entry(contents.get(i),stores.get(i),png));}finally{image.recycle();}final int done=i+1;runOnUiThread(()->{if(pending(ticket,tenant))ui.rendering(done,contents.size());});}
+                if(sortLocations)entries.sort((a,b)->LocationOrder.compare(a.content.location,b.content.location));LabelBatch generated=new LabelBatch(tenant,entries);runOnUiThread(()->commitGenerated(ticket,tenant,generated,reveal,0));
+            }catch(Exception error){String message=error instanceof IllegalArgumentException?error.getMessage():"本次标签未生成，请重试。";runOnUiThread(()->{if(pending(ticket,tenant))ui.failed(message);});}});
         }catch(Exception error){ui.failed(error instanceof IllegalArgumentException?error.getMessage():"查询返回的商品资料不完整，请重新查询。");}
     }
-    private void showPage(int index){
-        if(!requireQnhAccess()||batch==null||index<0||index>=batch.size()||exporting)return;LabelBatch captured=batch;long ticket=outputFence.get();int request=++pageRequest;ui.setActions(false);
-        renderer.submit(()->{BitmapFactory.Options options=new BitmapFactory.Options();options.inPreferredConfig=Bitmap.Config.RGB_565;options.inScaled=false;byte[] png=captured.get(index).png;Bitmap image=BitmapFactory.decodeByteArray(png,0,png.length,options);
-            runOnUiThread(()->{if(!current(ticket,captured.tenant)||request!=pageRequest){if(image!=null)image.recycle();return;}if(image==null){ui.setActions(true);ui.message("预览未能加载，请重试。");return;}releaseBitmap();bitmap=image;page=index;ui.showRecord(captured.get(index).content,captured.get(index).store);ui.showPage(image,index,captured.size());});
-        });
-    }
-    @Override protected void onAuthenticated(){ui.search.authenticated();if(scanValue!=null){restored=null;consumeScan();}else if(restored!=null){JSONArray rows=restored;restored=null;if(qnh.tenant().equals(restoredTenant))renderRows(rows,false);}else if(batch!=null&&bitmap==null)showPage(page);if(pdfTarget!=null)consumePdf();}
-    @Override protected void onAuthenticatedSnapshot(JSONObject value){ui.search.snapshot(value);}
-    @Override protected void onSessionUnavailable(){ui.search.suspended();scanValue=null;clearSelection();}
-    @Override protected void onTenantChanged(){ui.search.clearTenant();clearSelection();}
+    private void commitGenerated(long ticket,String tenant,LabelBatch generated,boolean reveal,int attempts){if(!pending(ticket,tenant))return;if(!qnh.verified()){if(attempts<100)ui.postDelayed(()->commitGenerated(ticket,tenant,generated,reveal,attempts+1),250);else ui.failed("登录验证尚未恢复，本次标签未添加，请重新查询。");return;}if(!tenant.equals(qnh.tenant()))return;try{queue.prepend(generated);refreshLabels();ui.message("新增 "+generated.size()+" 张 · 共 "+queue.size()+" 张，最新标签已置顶。");ui.search.message(ui.search.lookupNote()+"，标签已生成并置顶。");if(reveal)ui.revealResult();}catch(IllegalArgumentException error){ui.failed(error.getMessage());}}
+    @Override protected void onAuthenticated(){if(!queue.tenant().isEmpty()&&!queue.tenant().equals(qnh.tenant()))resetLabels();ui.search.authenticated();if(queue.size()>0&&batch==null)refreshLabels();if(scanValue!=null){restored=null;consumeScan();}else if(restored!=null){JSONArray rows=restored;restored=null;if(queue.size()==0&&qnh.tenant().equals(restoredTenant))renderRows(rows,false,false);}if(pdfTarget!=null)consumePdf();}
+    @Override protected void onAuthenticatedSnapshot(JSONObject value){ui.account(value.optString("username"),value.optString("tenantName"),value.optString("tenantId"));ui.search.snapshot(value);}
+    @Override protected void onSessionUnavailable(){resetLabels();ui.account("","","");ui.search.suspended();scanValue=null;}
+    @Override protected void onTenantChanged(){resetLabels();ui.search.clearTenant();}
     @Override public void onQnhMessage(String value){ui.search.message(value);}
     private boolean canExport(){return requireQnhAccess()&&batch!=null&&!exporting&&batch.tenant.equals(qnh.tenant());}
     private void savePdf(){if(!canExport())return;pdfBatch=batch;pdfTicket=outputFence.get();exporting=true;ui.setActions(false);Intent create=new Intent(Intent.ACTION_CREATE_DOCUMENT);create.addCategory(Intent.CATEGORY_OPENABLE);create.setType("application/pdf");create.putExtra(Intent.EXTRA_TITLE,"库管标签_"+batch.size()+"张_"+System.currentTimeMillis()+".pdf");try{startActivityForResult(create,63);}catch(Exception error){pdfBatch=null;exporting=false;ui.setActions(true);ui.message("未找到文件保存程序，请使用图片保存或分享。");}}
-    private void consumePdf(){LabelBatch captured=pdfBatch;Uri target=pdfTarget;long ticket=pdfTicket;pdfTarget=null;pdfBatch=null;if(captured==null||captured!=batch||ticket!=outputFence.get()||!captured.tenant.equals(qnh.tenant())){exporting=false;if(batch!=null)ui.setActions(true);return;}ui.message("正在保存 PDF · "+captured.size()+"页…");renderer.submit(()->{File temp=null;try{temp=File.createTempFile("kuguan-labels-",".pdf",getCacheDir());try(java.io.OutputStream out=new java.io.FileOutputStream(temp)){LabelPdf.write(captured,out,()->outputFence.get()==ticket);}if(outputFence.get()!=ticket)throw new java.io.IOException("已取消保存。");try(java.io.InputStream in=new java.io.FileInputStream(temp);java.io.OutputStream out=getContentResolver().openOutputStream(target,"w")){if(out==null)throw new java.io.IOException("文件无法写入。");byte[] bytes=new byte[8192];int n;while((n=in.read(bytes))!=-1){if(outputFence.get()!=ticket)throw new java.io.IOException("已取消保存。");out.write(bytes,0,n);}}runOnUiThread(()->{if(!current(ticket,captured.tenant))return;exporting=false;ui.setActions(true);ui.message("PDF 已保存 · "+captured.size()+"页，每页80×60毫米");if(bitmap==null)showPage(page);});}catch(Exception error){runOnUiThread(()->{if(!current(ticket,captured.tenant))return;exporting=false;ui.setActions(true);ui.message("PDF 未保存完成，请检查剩余空间后重试。");});}finally{if(temp!=null)temp.delete();}});}
+    private void consumePdf(){LabelBatch captured=pdfBatch;Uri target=pdfTarget;long ticket=pdfTicket;pdfTarget=null;pdfBatch=null;if(captured==null||captured!=batch||ticket!=outputFence.get()||!captured.tenant.equals(qnh.tenant())){exporting=false;if(batch!=null)ui.setActions(true);return;}ui.message("正在保存 PDF · "+captured.size()+"页…");renderer.submit(()->{File temp=null;try{temp=File.createTempFile("kuguan-labels-",".pdf",getCacheDir());try(java.io.OutputStream out=new java.io.FileOutputStream(temp)){LabelPdf.write(captured,out,()->outputFence.get()==ticket);}if(outputFence.get()!=ticket)throw new java.io.IOException("已取消保存。");try(java.io.InputStream in=new java.io.FileInputStream(temp);java.io.OutputStream out=getContentResolver().openOutputStream(target,"w")){if(out==null)throw new java.io.IOException("文件无法写入。");byte[] bytes=new byte[8192];int n;while((n=in.read(bytes))!=-1){if(outputFence.get()!=ticket)throw new java.io.IOException("已取消保存。");out.write(bytes,0,n);}}runOnUiThread(()->{if(!current(ticket,captured.tenant))return;exporting=false;ui.setActions(true);ui.message("PDF 已保存 · "+captured.size()+"页，每页80×60毫米");});}catch(Exception error){runOnUiThread(()->{if(!current(ticket,captured.tenant))return;exporting=false;ui.setActions(true);ui.message("PDF 未保存完成，请检查剩余空间后重试。");});}finally{if(temp!=null)temp.delete();}});}
     private void saveImages(){
         if(!canExport())return;
         if(Build.VERSION.SDK_INT<=28&&checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)!=PackageManager.PERMISSION_GRANTED){permissionBatch=batch;permissionTicket=outputFence.get();requestPermissions(new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE},51);return;}
@@ -119,7 +90,7 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
     @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);if(request==51){LabelBatch pending=permissionBatch;permissionBatch=null;if(pending!=null&&pending==batch&&permissionTicket==outputFence.get()&&results.length>0&&results[0]==PackageManager.PERMISSION_GRANTED)saveImages();else ui.message("未获相册保存权限，可使用分享图片。");}}
     @Override protected void onPause(){ui.search.paused();super.onPause();}
     @Override public void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(request==62&&result==RESULT_OK&&data!=null){scanValue=data.getStringExtra("value");scanFormat=data.getStringExtra("format");if(active()&&requireQnhAccess())consumeScan();}if(request==63){if(result==RESULT_OK&&data!=null&&data.getData()!=null){pdfTarget=data.getData();if(active()&&requireQnhAccess())consumePdf();}else{pdfBatch=null;pdfTarget=null;exporting=false;if(batch!=null)ui.setActions(true);}}}
-    @Override protected void onSaveInstanceState(Bundle out){ui.search.saveState(out);out.putString("scanner-tenant",scannerTenant);if(selectedRows!=null){String raw=selectedRows.toString();if(raw.length()<200000)out.putString("selected-rows",raw);out.putString("selected-tenant",selection.tenant());}super.onSaveInstanceState(out);}
-    @Override public void onTrimMemory(int level){super.onTrimMemory(level);if(level>=TRIM_MEMORY_RUNNING_LOW&&batch!=null&&!isQnhScreenActive())releaseBitmap();}
-    @Override public void onDestroy(){destroyed=true;outputFence.incrementAndGet();pageRequest++;selection.clear();if(renderJob!=null)renderJob.cancel(false);renderer.shutdownNow();ui.search.destroy();releaseBitmap();batch=null;super.onDestroy();}
+    @Override protected void onSaveInstanceState(Bundle out){ui.search.saveState(out);out.putString("scanner-tenant",scannerTenant);if(queue.size()>0){JSONArray rows=new JSONArray();List<LabelQueue.Item> values=queue.items();for(int i=0;i<values.size();i++){LabelBatch.Entry e=values.get(i).entry;try{rows.put(new JSONObject().put("name",e.content.name).put("spec",e.content.spec).put("sku",e.content.sku).put("loc",e.content.location).put("store",e.store));}catch(Exception ignored){}}String raw=rows.toString();if(raw.length()<200000){out.putString("generated-rows",raw);out.putString("generated-tenant",queue.tenant());}}super.onSaveInstanceState(out);}
+    @Override public void onTrimMemory(int level){super.onTrimMemory(level);if(level>=TRIM_MEMORY_RUNNING_LOW)ui.trimPreviews();}
+    @Override public void onDestroy(){destroyed=true;outputFence.incrementAndGet();selection.clear();if(renderJob!=null)renderJob.cancel(false);renderer.shutdownNow();ui.search.destroy();ui.dispose();batch=null;super.onDestroy();}
 }

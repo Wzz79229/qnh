@@ -1,0 +1,24 @@
+{
+  "version": "0.8.6",
+  "versionCode": 17,
+  "bytes": 889943,
+  "sha256": "c5ca964744caf3f06367df4ff699a8b8e312d46c05a7d3a80354f7b62cbeff56",
+  "sameSigningCertificate": true,
+  "assetsAndNativeLibrariesByteExactAgainst085": true,
+  "queryGestures": "Native touch events: single tap sets editing cursor; keyboard inserts uppercase text without replacing all; double tap selects all including punctuation and spaces; later single tap collapses selection; performClick does not force selection.",
+  "nativeRegression": "Synthetic API 35 emulator: scanner frames and photo decoding, raw A10 response across pages, group ordering, multi-select, gallery PNGs, PDF, hidden browser and mobile login passed.",
+  "initialRegressionAttempt": "Input gesture assertions passed, then an existing scanner test timed out waiting for its analyzer worker. Initial failure log retained; production scanner code unchanged.",
+  "releaseStartup": {
+    "version": "0.8.6",
+    "sha256": "c5ca964744caf3f06367df4ff699a8b8e312d46c05a7d3a80354f7b62cbeff56",
+    "releaseApk": true,
+    "startActivity": "QnhLoginActivity",
+    "aliveAfterStartup": true,
+    "offline": true,
+    "realAccountUsed": false
+  },
+  "realPhoneTestedThisTurn": false,
+  "createdAt": "2026-10-18T18:36:16.333203+00:00",
+  "firstFormalVersion": true,
+  "repository": "Wzz79229/qnh"
+}

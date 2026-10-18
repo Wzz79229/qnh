@@ -1,0 +1,7 @@
+package com.xianqi.phonevalidation;
+import org.junit.Test;import static org.junit.Assert.*;import java.util.*;
+public class LocationOrderTest {
+ @Test public void wholeLocationGroupsUseNaturalAscendingOrder(){List<String> rows=new ArrayList<>(Arrays.asList("A10-2-1","A10-1-10","A10-1-2","A10-1-1"));rows.sort(LocationOrder::compare);assertEquals(Arrays.asList("A10-1-1","A10-1-2","A10-1-10","A10-2-1"),rows);}
+ @Test public void longNumbersAndCaseDoNotOverflowOrChangeNumericOrder(){assertTrue(LocationOrder.compare("A2-1","A10-1")<0);assertEquals(0,LocationOrder.compare("a10-01-2","A10-1-2"));assertTrue(LocationOrder.compare("A10-99999999999999999999","A10-100000000000000000000")<0);}
+ @Test public void aSortedNewGroupStaysAheadOfAllOldLabels(){LabelQueue q=new LabelQueue();LabelBatch.Entry old=new LabelBatch.Entry(LabelContent.create("旧标签","","000123","A1"),"仓",new byte[]{1});q.prepend(new LabelBatch("777",Collections.singletonList(old)));List<LabelBatch.Entry> group=new ArrayList<>();for(String loc:Arrays.asList("A10-2-1","A10-1-10","A10-1-2"))group.add(new LabelBatch.Entry(LabelContent.create("商品","","000124",loc),"仓",new byte[]{2}));group.sort((a,b)->LocationOrder.compare(a.content.location,b.content.location));q.prepend(new LabelBatch("777",group));LabelBatch out=q.snapshot("777");assertEquals("A10-1-2",out.get(0).content.location);assertEquals("A10-1-10",out.get(1).content.location);assertEquals("A10-2-1",out.get(2).content.location);assertEquals("A1",out.get(3).content.location);}
+}

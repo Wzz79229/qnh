@@ -8,8 +8,11 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.view.GestureDetector;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewConfiguration;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.AutoCompleteTextView;
@@ -29,23 +32,51 @@ public final class InventorySearchPanel extends LinearLayout {
         void onQueryChanged();
         void onSelected(JSONObject row);
         default void onScan(){}
+        default void onLocationBatchSelected(JSONArray rows){onBatchSelected(rows);}
         default void onBatchSelected(JSONArray rows){if(rows.length()==1)onSelected(rows.optJSONObject(0));}
     }
     private final Activity owner;private final Host host;private final QnhConnection qnh;
     private NameInput name;
-    private TextView status,scope,detected;private LinearLayout results,pages;private Button query,previous,next;
-    private JSONArray rows=new JSONArray();private String request="",displayed="";
+    private TextView status,scope,detected;private LinearLayout results,pages;private Button query,previous,next,storeChoice;
+    private JSONArray rows=new JSONArray();private String request="",displayed="",scanFilter="";
     private int serial=0,storeDepth=0;private boolean changing=false,queued=false,busy=false,queuedStores=false,productReady=false;
     private AlertDialog stores;
     private LinearLayout batchBar;private Button generateBatch,checkAll;
     private final java.util.Set<Integer> checked=new java.util.LinkedHashSet<>();
-    private int[] batchIndices;private int batchCursor=0;private JSONArray batchRows;private boolean batchReturning=false;
-    private Button generateScope;private boolean allPrefix=false,waitingPage=false,returningForPage=false,scopeHasNext=false;private int scopePage=1;private String scopePrefix="";
-    private String batchReceipt="";private JSONArray pageRows;
+    private int[] batchIndices;private int batchCursor=0;private JSONArray batchRows;private boolean batchReturning=false,batchResuming=false;
+    private long selectionSequence=0;private String selectionToken="";
+    private boolean allPrefix=false,waitingPage=false,returningForPage=false,scopeHasNext=false;private int scopePage=1;private String scopePrefix="";
+    private String batchReceipt="";private JSONObject queryFilters;private JSONArray pageRows;private boolean responsePage=false;
+    private int responsePages=0;private boolean pageFallback=false;
+    public String lookupNote(){return responsePages>0&&!pageFallback?"库存数据已直接读取 · "+responsePages+"页":"已通过页面核对库存";}
     private final Handler handler=new Handler(Looper.getMainLooper());
-    private final Runnable autocomplete=()->search();
     private static final class NameInput extends AutoCompleteTextView {
-        NameInput(Context context){super(context);}
+        private final GestureDetector taps;
+        private final int touchSlop;
+        private boolean selectWhole;
+        private float downX,downY;
+        NameInput(Context context){super(context);
+            touchSlop=ViewConfiguration.get(context).getScaledTouchSlop();
+            taps=new GestureDetector(context,new GestureDetector.SimpleOnGestureListener(){
+                @Override public boolean onDown(MotionEvent event){return true;}
+                @Override public boolean onDoubleTap(MotionEvent event){selectWhole=true;return true;}
+            });
+            // Observe taps without taking over the editor's long press or cursor gestures.
+            taps.setIsLongpressEnabled(false);
+        }
+        @Override public boolean onTouchEvent(MotionEvent event){
+            int action=event.getActionMasked();
+            if(action==MotionEvent.ACTION_DOWN){selectWhole=false;downX=event.getX();downY=event.getY();}
+            taps.onTouchEvent(event);
+            if(action==MotionEvent.ACTION_MOVE&&(Math.abs(event.getX()-downX)>touchSlop||Math.abs(event.getY()-downY)>touchSlop))selectWhole=false;
+            boolean handled=super.onTouchEvent(event);
+            if(action==MotionEvent.ACTION_UP){
+                // Apply after native word selection so a double tap selects the whole query.
+                if(selectWhole&&event.getEventTime()-event.getDownTime()<ViewConfiguration.getLongPressTimeout())selectAll();
+                selectWhole=false;
+            }else if(action==MotionEvent.ACTION_CANCEL)selectWhole=false;
+            return handled;
+        }
         @Override protected void replaceText(CharSequence value){}
     }
     private int dp(int n){return WarehouseUi.dp(owner,n);}
@@ -55,33 +86,34 @@ public final class InventorySearchPanel extends LinearLayout {
     private Button button(String value,android.view.View.OnClickListener click){Button b=WarehouseUi.button(owner,value,false,click);b.setGravity(Gravity.START|Gravity.CENTER_VERTICAL);return b;}
     private EditText field(LinearLayout root,String title,String hint){TextView label=WarehouseUi.text(owner,title,12,WarehouseUi.MUTED,false);root.addView(label);WarehouseUi.space(root,6);EditText e=new EditText(owner);WarehouseUi.input(e,hint);root.addView(e);return e;}
     public InventorySearchPanel(Activity owner,Host host,Bundle state){super(owner);this.owner=owner;this.host=host;qnh=QnhConnection.get(owner);setOrientation(VERTICAL);
-        LinearLayout heading=new LinearLayout(owner);heading.setGravity(Gravity.CENTER_VERTICAL);TextView title=WarehouseUi.text(owner,"查询商品",18,WarehouseUi.INK,true);heading.addView(title,new LayoutParams(0,-2,1));
-        heading.addView(WarehouseUi.button(owner,"清空",false,v->{changing=true;for(EditText e:fields())e.setText("");changing=false;cancel();host.onQueryChanged();detected.setText("自动识别名称、SKU、库位 · 点击更改类型");status.setText("输入查询条件，标签将自动生成。");}));
-        addView(heading);WarehouseUi.space(this,12);
         LinearLayout queryRow=new LinearLayout(owner);queryRow.setGravity(Gravity.CENTER_VERTICAL);name=new NameInput(owner);name.setFilters(new android.text.InputFilter[]{(android.os.Build.VERSION.SDK_INT>=27?new android.text.InputFilter.AllCaps(java.util.Locale.ROOT):new android.text.InputFilter.AllCaps()),new android.text.InputFilter.LengthFilter(100)});name.setThreshold(2);WarehouseUi.input(name,"输入名称 / SKU / 库位");name.setGravity(Gravity.CENTER);name.setIncludeFontPadding(false);name.setMinHeight(dp(52));name.setPadding(dp(12),dp(10),dp(12),dp(10));name.setTag("smart-query-input");queryRow.addView(name,new LayoutParams(0,-2,1));Button scan=WarehouseUi.button(owner,"扫码",false,v->{if(requireQnhAccess())host.onScan();});scan.setTag("query-scan");scan.setContentDescription("扫描条形码查询商品");LayoutParams scanSize=new LayoutParams(dp(56),dp(52));scanSize.setMarginStart(dp(8));queryRow.addView(scan,scanSize);addView(queryRow,new LayoutParams(-1,-2));WarehouseUi.space(this,8);
         detected=WarehouseUi.text(owner,"自动识别名称、SKU、库位 · 点击更改类型",12,WarehouseUi.GREEN,false);detected.setPadding(0,dp(4),0,dp(4));detected.setOnClickListener(v->{String[] types={"自动识别","商品名称","SKU","库位","商品条码","外部编码"};new AlertDialog.Builder(owner).setTitle("查询类型").setItems(types,(dialog,index)->{String raw=name.getText().toString().trim();try{raw=SmartQuery.parse(raw).value;}catch(IllegalArgumentException ignored){}String[] prefixes={"","名称:","SKU:","库位:","条码:","外部编码:"};name.setText(prefixes[index]+raw);name.setSelection(name.length());}).show();});addView(detected);WarehouseUi.space(this,10);
-        addView(WarehouseUi.button(owner,"选择门店 / 仓 ▾",false,v->openStores()),new LayoutParams(-1,dp(40)));WarehouseUi.space(this,8);
-        scope=WarehouseUi.text(owner,"正在连接库存查询（新）…",12,WarehouseUi.MUTED,false);addView(scope);WarehouseUi.space(this,6);
+        storeChoice=WarehouseUi.button(owner,"选择门店 / 仓 ▾",false,v->openStores());storeChoice.setSingleLine(true);storeChoice.setEllipsize(android.text.TextUtils.TruncateAt.END);addView(storeChoice,new LayoutParams(-1,dp(40)));WarehouseUi.space(this,8);
+        scope=WarehouseUi.text(owner,"库存查询（新）",12,WarehouseUi.MUTED,false);scope.setVisibility(GONE);addView(scope);WarehouseUi.space(this,6);
         status=WarehouseUi.text(owner,"唯一结果自动出图；多条结果请选择商品与库位。",12,WarehouseUi.MUTED,false);addView(status);WarehouseUi.space(this,12);
         query=WarehouseUi.button(owner,"查询并生成标签",true,v->search());query.setTag("smart-query-submit");addView(query,new LayoutParams(-1,dp(46)));
-        generateScope=WarehouseUi.button(owner,"生成整个区域的标签",false,v->startPrefix());generateScope.setTag("scope-generate");generateScope.setVisibility(GONE);addView(generateScope,new LayoutParams(-1,-2));
         results=new LinearLayout(owner);results.setOrientation(VERTICAL);addView(results);
         batchBar=new LinearLayout(owner);batchBar.setOrientation(VERTICAL);WarehouseUi.space(batchBar,10);checkAll=WarehouseUi.button(owner,"全选本页（最多50张）",false,v->toggleAll());batchBar.addView(checkAll);WarehouseUi.space(batchBar,8);generateBatch=WarehouseUi.button(owner,"生成所选（0张）",true,v->startBatch());generateBatch.setTag("batch-generate");batchBar.addView(generateBatch);batchBar.setVisibility(GONE);addView(batchBar,indexOfChild(results));
         pages=new LinearLayout(owner);previous=WarehouseUi.button(owner,"上一页",false,v->page(-1));next=WarehouseUi.button(owner,"下一页",false,v->page(1));previous.setEnabled(false);next.setEnabled(false);LayoutParams p=new LayoutParams(0,dp(42),1);p.setMarginEnd(dp(8));pages.addView(previous,p);pages.addView(next,new LayoutParams(0,dp(42),1));pages.setVisibility(GONE);addView(pages);
-        if(state!=null)name.setText(state.getString("query-text",""));
+        if(state!=null){android.text.InputFilter[] saved=name.getFilters();name.setFilters(new android.text.InputFilter[0]);name.setText(state.getString("query-text",""));name.setFilters(saved);scanFilter=state.getString("query-scan-filter","");if(!scanFilter.isEmpty())try{parsedQuery();}catch(IllegalArgumentException ignored){scanFilter="";}}
         TextWatcher watcher=new TextWatcher(){public void beforeTextChanged(CharSequence v,int start,int count,int after){}public void afterTextChanged(Editable value){}
-            public void onTextChanged(CharSequence value,int start,int before,int count){if(changing)return;cancel();host.onQueryChanged();status.setText("查询后自动生成标签。");try{SmartQuery parsed=SmartQuery.parse(value.toString());detected.setText("已识别为："+parsed.label+" · 点击更改类型");if(name.hasFocus()&&parsed.key.equals("name")&&parsed.value.length()>=2)handler.postDelayed(autocomplete,800);}catch(IllegalArgumentException error){detected.setText(value.length()==0?"自动识别名称、SKU、库位 · 点击更改类型":error.getMessage());}}
+            public void onTextChanged(CharSequence value,int start,int before,int count){if(changing)return;scanFilter="";cancel();host.onQueryChanged();status.setText("查询后自动生成标签。");try{SmartQuery parsed=SmartQuery.parse(value.toString());detected.setText("已识别为："+parsed.label+" · 直接查询牵牛花");}catch(IllegalArgumentException error){detected.setText(value.length()==0?"自动识别名称、SKU、库位 · 点击更改类型":error.getMessage());}}
         };
         name.addTextChangedListener(watcher);name.setOnEditorActionListener((v,action,event)->{if(action==android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH||event!=null&&event.getAction()==android.view.KeyEvent.ACTION_DOWN&&event.getKeyCode()==android.view.KeyEvent.KEYCODE_ENTER){search();return true;}return false;});
+        name.setSelectAllOnFocus(false);
         name.setOnItemClickListener((parent,view,index,id)->select(index));
     }
-    public void scanned(String raw,String format){try{String text=BarcodeDecoder.query(raw,format);changing=true;android.text.InputFilter[] saved=name.getFilters();name.setFilters(new android.text.InputFilter[0]);name.setText(text);name.setFilters(saved);name.setSelection(name.length());changing=false;search();}catch(IllegalArgumentException error){changing=false;status.setText(error.getMessage());}}
+    public void scanned(String raw,String format){try{String text=BarcodeDecoder.query(raw,format);SmartQuery parsed=SmartQuery.parse(text);changing=true;android.text.InputFilter[] saved=name.getFilters();name.setFilters(new android.text.InputFilter[0]);name.setText(parsed.value);name.setFilters(saved);name.setSelection(name.length());scanFilter=text;changing=false;search();}catch(IllegalArgumentException error){changing=false;status.setText(error.getMessage());}}
+    private SmartQuery parsedQuery(){String raw=name.getText().toString();if(!scanFilter.isEmpty()){try{SmartQuery scan=SmartQuery.parse(scanFilter);if(scan.value.equals(raw.trim()))return scan;}catch(IllegalArgumentException ignored){}scanFilter="";}return SmartQuery.parse(raw);}
     private EditText[] fields(){return new EditText[]{name};}
-    private JSONObject filters(){SmartQuery parsed=SmartQuery.parse(name.getText().toString());detected.setText("已识别为："+parsed.label+" · 点击更改类型");JSONObject f=new JSONObject();try{f.put(parsed.key,parsed.value);}catch(Exception ignored){}return f;}
-    private void cancel(){serial++;request="";displayed="";queued=false;queuedStores=false;busy=false;batchIndices=null;batchRows=null;batchReturning=false;allPrefix=false;waitingPage=false;returningForPage=false;if(generateScope!=null)generateScope.setVisibility(GONE);if(results!=null)results.setVisibility(VISIBLE);checked.clear();if(batchBar!=null)batchBar.setVisibility(GONE);handler.removeCallbacks(autocomplete);if(name!=null){name.dismissDropDown();name.setAdapter(new ArrayAdapter<String>(owner,R.layout.inventory_suggestion,new String[0]));}rows=new JSONArray();if(pages!=null)pages.setVisibility(GONE);if(results!=null)results.removeAllViews();if(query!=null)query.setEnabled(true);if(previous!=null)previous.setEnabled(false);if(next!=null)next.setEnabled(false);if(qnh!=null)qnh.command("window.__kuguanInventory.cancel()",null);}
-    private void search(){handler.removeCallbacks(autocomplete);if(!requireQnhAccess())return;try{filters();}catch(IllegalArgumentException error){status.setText(error.getMessage());return;}
-        cancel();host.onQueryChanged();queued=true;busy=true;query.setEnabled(false);status.setText("正在按条件查询库存…");qnh.inventory();int waiting=serial;handler.postDelayed(()->{if(queued&&serial==waiting)fail("库存页面未准备好，请检查网络和牵牛花库存查询权限后重试。");},30000);
+    private JSONObject filters(){SmartQuery parsed=parsedQuery();detected.setText("已识别为："+parsed.label+" · 直接查询牵牛花");JSONObject f=new JSONObject();try{f.put(parsed.key,parsed.value);}catch(Exception ignored){}return f;}
+    public void cancelQuery(){cancel();}
+    private void cancel(){serial++;request="";displayed="";selectionToken="";queued=false;queuedStores=false;busy=false;batchIndices=null;batchRows=null;batchReturning=false;batchResuming=false;allPrefix=false;waitingPage=false;returningForPage=false;if(results!=null)results.setVisibility(VISIBLE);checked.clear();if(batchBar!=null)batchBar.setVisibility(GONE);if(name!=null){name.dismissDropDown();name.setAdapter(new ArrayAdapter<String>(owner,R.layout.inventory_suggestion,new String[0]));}rows=new JSONArray();if(pages!=null)pages.setVisibility(GONE);if(results!=null)results.removeAllViews();if(query!=null)query.setEnabled(true);if(previous!=null)previous.setEnabled(false);if(next!=null)next.setEnabled(false);if(qnh!=null)qnh.command("window.__kuguanInventory.cancel()",null);}
+    private void search(){if(!requireQnhAccess())return;try{filters();}catch(IllegalArgumentException error){status.setText(error.getMessage());return;}
+        hideKeyboard();cancel();responsePages=0;pageFallback=false;host.onQueryChanged();queued=true;busy=true;query.setEnabled(false);status.setText(inputPrefix().isEmpty()?"正在按条件查询库存…":"正在通过库存查询整区库位…");qnh.inventory(!inputPrefix().isEmpty());int waiting=serial;handler.postDelayed(()->{if(queued&&serial==waiting)fail("库存页面未准备好，请检查网络和牵牛花库存查询权限后重试。");},30000);
     }
+    private void hideKeyboard(){name.dismissDropDown();InputMethodManager keyboard=(InputMethodManager)owner.getSystemService(Context.INPUT_METHOD_SERVICE);if(keyboard!=null)keyboard.hideSoftInputFromWindow(name.getWindowToken(),0);}
+    private String inputPrefix(){try{SmartQuery parsed=parsedQuery();return parsed.key.equals("loc")&&parsed.value.matches("(?i)[a-z]{1,3}[0-9]{1,3}")?parsed.value.toUpperCase(java.util.Locale.ROOT):"";}catch(Exception error){return "";}}
     private void runQuery(){if(!queued)return;queued=false;request=String.valueOf(++serial);String current=request;
         qnh.command("window.__kuguanInventory.search("+JSONObject.quote(current)+","+filters().toString()+","+JSONObject.quote(qnh.tenant())+")",ok->{if(current.equals(request)&&!Boolean.TRUE.equals(ok))fail("查询条件未被接受。库位最多四段、每段六个字符；SKU 请填写完整编码。");});
         handler.postDelayed(()->{if(current.equals(request)&&busy&&batchIndices==null)fail("查询超时，请检查网络、门店权限和查询条件后重试。");},35000);
@@ -89,50 +121,79 @@ public final class InventorySearchPanel extends LinearLayout {
     private void fail(String value){cancel();status.setText(value);}
     public void authenticated(){qnh.watchInventory(true);qnh.inventory();}
     public void suspended(){cancel();status.setText("登录恢复后，请重新查询商品。");if(stores!=null){stores.dismiss();stores=null;}}
-    public void clearTenant(){changing=true;for(EditText field:fields())field.setText("");changing=false;cancel();}
+    public void clearTenant(){changing=true;scanFilter="";for(EditText field:fields())field.setText("");changing=false;cancel();}
     public void message(String value){status.setText(value);}
     public void snapshot(JSONObject value){
-        productReady=value.optBoolean("productReady");if(queuedStores&&productReady){queuedStores=false;openStores();return;}
-        String store=value.optString("store");if(!store.isEmpty())scope.setText("库存查询（新） · "+store);
-        if(queued&&value.optBoolean("productReady")){runQuery();return;}
-        if(batchReturning){if(productReady){batchReturning=false;String current=request;boolean advance=returningForPage;returningForPage=false;qnh.command("window.__kuguanInventory.resume("+JSONObject.quote(current)+","+filters().toString()+","+JSONObject.quote(qnh.tenant())+","+scopePage+","+JSONObject.quote(batchReceipt)+","+pageRows.toString()+")",ok->{if(!current.equals(request)||!busy)return;if(!Boolean.TRUE.equals(ok)){fail("返回后的库存结果未通过核对，请重新查询。");return;}if(advance)nextScopePage();else resolve(batchIndices[batchCursor]);});}return;}
+        productReady=value.optBoolean("productReady");if(queuedStores&&productReady&&qnh.isLegacyInventory()==!inputPrefix().isEmpty()){queuedStores=false;openStores();return;}
+        String store=value.optString("store");if(!store.isEmpty())storeChoice.setText(store+" ▾");
+        if(queued&&value.optBoolean("productReady")&&(inputPrefix().isEmpty()?"new":"legacy").equals(value.optString("source"))){runQuery();return;}
+        if(batchReturning){
+            // Keep the return gate closed until resume's asynchronous acknowledgement.
+            // A queued "selected" snapshot still belongs to the preceding product.
+            if(productReady&&!batchResuming){batchResuming=true;String current=request;boolean advance=returningForPage;int step=batchCursor;int[] indices=batchIndices;
+                qnh.command("window.__kuguanInventory.resume("+JSONObject.quote(current)+","+queryFilters.toString()+","+JSONObject.quote(qnh.tenant())+","+scopePage+","+JSONObject.quote(batchReceipt)+","+pageRows.toString()+")",ok->{
+                    if(!current.equals(request)||!busy||!batchReturning||!batchResuming||indices!=batchIndices||step!=batchCursor)return;
+                    if(!Boolean.TRUE.equals(ok)){fail("返回后的库存结果未通过核对，请重新查询。");return;}
+                    batchResuming=false;batchReturning=false;returningForPage=false;
+                    if(advance)nextScopePage();else if(indices!=null&&step<indices.length)resolve(indices[step]);else fail("库存核对进度已变化，请重新查询。");
+                });
+            }return;
+        }
         if(request.isEmpty()||!request.equals(value.optString("requestId")))return;
         String phase=value.optString("status");
-        if("selected".equals(phase)){finishSelection(value.optJSONObject("row"));return;}
+        if("pending".equals(phase)){status.setText("正在通过牵牛花查询库存…");return;}
+        if("selected".equals(phase)){if(!selectionToken.isEmpty()&&selectionToken.equals(value.optString("selectionId"))){selectionToken="";finishSelection(value.optJSONObject("row"),value.optBoolean("inventoryRetained"));}return;}
         if("resolving".equals(phase)){status.setText("正在核对所选商品的完整 SKU…");return;}
         if("error".equals(phase)){fail("查询结果尚未确认，请重新查询。");return;}
         if(!"found".equals(phase)&&!"not_found".equals(phase))return;
         if(allPrefix&&waitingPage){acceptScopePage(value,false);return;}
+        if(busy&&batchIndices!=null)return;
         String key=request+":"+phase;if(key.equals(displayed))return;displayed=key;busy=false;query.setEnabled(true);
         JSONObject paging=value.optJSONObject("pagination");previous.setEnabled(paging!=null&&paging.optBoolean("previous"));next.setEnabled(paging!=null&&paging.optBoolean("next"));
-        scopeHasNext=paging!=null&&paging.optBoolean("next");scopePage=paging==null?1:paging.optInt("current",1);scopePrefix="";try{SmartQuery parsed=SmartQuery.parse(name.getText().toString());if(parsed.key.equals("loc")&&parsed.value.matches("(?i)[a-z]{1,3}[0-9]{1,3}"))scopePrefix=parsed.value.toUpperCase(java.util.Locale.ROOT);}catch(IllegalArgumentException ignored){}generateScope.setText("生成 "+scopePrefix+" 全部标签");generateScope.setVisibility(!scopePrefix.isEmpty()&&scopePage==1&&"found".equals(phase)?VISIBLE:GONE);generateScope.setEnabled(true);
+        scopeHasNext=paging!=null&&paging.optBoolean("next");scopePage=paging==null?1:paging.optInt("current",1);scopePrefix=inputPrefix();
         pages.setVisibility(paging!=null&&(paging.optBoolean("previous")||paging.optBoolean("next"))?VISIBLE:GONE);
-        rows=value.optJSONArray("rows");if(rows==null)rows=new JSONArray();pageRows=rows;batchReceipt=value.optString("receipt");results.removeAllViews();checked.clear();String[] suggestions=new String[rows.length()];
+        rows=value.optJSONArray("rows");if(rows==null)rows=new JSONArray();rememberPage(value);if(!scopePrefix.isEmpty()&&rows.length()>0){startPrefix();return;}results.removeAllViews();checked.clear();String[] suggestions=new String[rows.length()];
         for(int i=0;i<rows.length();i++){JSONObject row=rows.optJSONObject(i);if(row==null){fail("库存记录不完整，请重试。");return;}String title=row.optString("name")+"\n"+row.optString("spec")+"\n"+row.optString("store")+" · 库位："+(row.optString("loc").isEmpty()?"未设置":row.optString("loc"));suggestions[i]=title;final int index=i;Button choice=button(title,v->select(index));LinearLayout line=new LinearLayout(owner);line.setGravity(Gravity.CENTER_VERTICAL);CheckBox box=new CheckBox(owner);box.setTag("batch-choice-"+i);box.setContentDescription("多选："+title);box.setButtonTintList(android.content.res.ColorStateList.valueOf(WarehouseUi.GREEN));box.setOnCheckedChangeListener((view,valueChecked)->{if(valueChecked&&checked.size()>=LabelBatch.MAX_SELECTION){view.setChecked(false);status.setText("每批最多50张，请分批选择。");return;}if(valueChecked)checked.add(index);else checked.remove(index);updateBatch();});line.addView(box,new LayoutParams(dp(44),dp(48)));line.addView(choice,new LayoutParams(0,-2,1));LayoutParams choiceSize=new LayoutParams(-1,-2);choiceSize.topMargin=dp(8);results.addView(line,choiceSize);}
         batchBar.setVisibility(rows.length()>1?VISIBLE:GONE);checkAll.setEnabled(true);updateBatch();
         status.setText(rows.length()==0?"没有符合条件的库存记录，请调整名称、库位或门店范围。":"可点选单张，或勾选多个商品后批量生成（本页 "+rows.length()+" 条）。");
         if(rows.length()==1&&paging!=null&&!paging.optBoolean("previous")&&!paging.optBoolean("next")){results.removeAllViews();select(0);return;}
-        name.setAdapter(new ArrayAdapter<>(owner,R.layout.inventory_suggestion,suggestions));if(name.hasFocus()&&rows.length()>0&&SmartQuery.parse(name.getText().toString()).key.equals("name"))name.showDropDown();
+        name.setAdapter(new ArrayAdapter<>(owner,R.layout.inventory_suggestion,new String[0]));
     }
-    private void select(int index){if(!requireQnhAccess()||busy||request.isEmpty()||index<0||index>=rows.length())return;handler.removeCallbacks(autocomplete);name.dismissDropDown();InputMethodManager keyboard=(InputMethodManager)owner.getSystemService(Context.INPUT_METHOD_SERVICE);if(keyboard!=null)keyboard.hideSoftInputFromWindow(name.getWindowToken(),0);busy=true;query.setEnabled(false);generateBatch.setEnabled(false);checkAll.setEnabled(false);generateScope.setEnabled(false);String current=request;
+    private void select(int index){if(!requireQnhAccess()||busy||request.isEmpty()||index<0||index>=rows.length())return;name.dismissDropDown();InputMethodManager keyboard=(InputMethodManager)owner.getSystemService(Context.INPUT_METHOD_SERVICE);if(keyboard!=null)keyboard.hideSoftInputFromWindow(name.getWindowToken(),0);busy=true;query.setEnabled(false);generateBatch.setEnabled(false);checkAll.setEnabled(false);String current=request;
         resolve(index);
     }
-    private void resolve(int index){String current=request;int step=batchCursor;status.setText(batchIndices==null?"正在核对商品的完整 SKU…":(allPrefix?"正在核对 "+scopePrefix+" · 第"+scopePage+"页 · 已核对"+batchRows.length()+"条…":"正在核对所选商品 "+(batchCursor+1)+" / "+batchIndices.length+"…"));qnh.command("window.__kuguanInventory.select("+JSONObject.quote(current)+","+index+","+JSONObject.quote(qnh.tenant())+")",ok->{if(current.equals(request)&&!Boolean.TRUE.equals(ok))fail("库存结果已经变化，请重新查询后选择。");});handler.postDelayed(()->{if(current.equals(request)&&busy&&batchCursor==step)fail("商品核对超时，请重新查询后重试。");},25000);}
-    private void finishSelection(JSONObject row){try{if(row==null||!row.getString("sku").matches("[A-Za-z0-9._-]{1,64}")||row.getString("name").isEmpty()||row.getString("name").length()>200||row.optString("spec").length()>240||row.optString("loc").length()>300)throw new Exception();
-        if(batchIndices!=null){batchRows.put(row);batchCursor++;if(allPrefix&&batchCursor==batchIndices.length&&scopeHasNext){batchReturning=true;returningForPage=true;String current=request;qnh.restoreInventory();handler.postDelayed(()->{if(current.equals(request)&&returningForPage)fail("返回区域库存列表超时，请重新查询。");},25000);return;}if(batchCursor<batchIndices.length){batchReturning=true;String current=request;int step=batchCursor;qnh.restoreInventory();handler.postDelayed(()->{if(current.equals(request)&&batchReturning&&batchCursor==step)fail("返回库存列表超时，请重新查询。");},25000);return;}JSONArray done=batchRows;batchIndices=null;batchRows=null;finishControls();status.setText("已核对 "+done.length()+" 个商品，正在批量生成标签。");host.onBatchSelected(done);}else{finishControls();status.setText("已查询并核对商品，标签正在下方生成。");host.onSelected(row);}qnh.restoreInventory();
+    private void resolve(int index){if(responsePage&&batchIndices!=null){resolveResponseBatch();return;}String current=request,token=String.valueOf(++selectionSequence);selectionToken=token;status.setText(batchIndices==null?"正在核对商品的完整 SKU…":(allPrefix?"正在核对 "+scopePrefix+" · 第"+scopePage+"页 · 已核对"+batchRows.length()+"条…":"正在核对所选商品 "+(batchCursor+1)+" / "+batchIndices.length+"…"));String call="window.__kuguanInventory.select("+JSONObject.quote(current)+","+index+","+JSONObject.quote(qnh.tenant())+","+JSONObject.quote(token)+")";qnh.command("(()=>{const accepted="+call+";const value=accepted?window.__kuguanInventory.inspect(false):null;return {accepted,snapshot:value?{authorized:value.authorized,tenantId:value.tenantId,status:value.status,requestId:value.requestId,selectionId:value.selectionId,row:value.row,inventoryRetained:value.inventoryRetained}:null};})()",result->{if(!current.equals(request)||!token.equals(selectionToken))return;if(!(result instanceof JSONObject)||!((JSONObject)result).optBoolean("accepted")){fail("库存结果已经变化，请重新查询后选择。");return;}JSONObject value=((JSONObject)result).optJSONObject("snapshot");if(value!=null&&value.optBoolean("authorized")&&qnh.tenant().equals(value.optString("tenantId")))snapshot(value);});handler.postDelayed(()->{if(current.equals(request)&&busy&&token.equals(selectionToken))fail("商品核对超时，请重新查询后重试。");},25000);}
+    private static boolean validRow(JSONObject row){return row!=null&&row.optString("sku").matches("[A-Za-z0-9._-]{1,64}")&&!row.optString("name").isEmpty()&&row.optString("name").length()<=200&&row.optString("spec").length()<=240&&row.optString("loc").length()<=300;}
+    private void resolveResponseBatch(){
+        String current=request,token=String.valueOf(++selectionSequence),tenant=qnh.tenant();selectionToken=token;int[] indices=batchIndices;
+        JSONArray selected=new JSONArray();for(int index:indices)selected.put(index);
+        status.setText("正在读取库存响应 · 第"+scopePage+"页 · 已读取"+batchRows.length()+"条…");
+        qnh.command("(()=>{const rows=window.__kuguanInventory.takeResponseRows("+JSONObject.quote(current)+","+selected+","+JSONObject.quote(tenant)+");const value=window.__kuguanInventory.inspect(false);return {authorized:value.authorized,tenantId:value.tenantId,requestId:value.requestId,rows};})()",result->{
+            if(!current.equals(request)||!token.equals(selectionToken)||indices!=batchIndices||!busy)return;selectionToken="";
+            try{if(!(result instanceof JSONObject)||!qnh.verified()||!tenant.equals(qnh.tenant()))throw new Exception();JSONObject value=(JSONObject)result;JSONArray picked=value.optJSONArray("rows");if(!value.optBoolean("authorized")||!tenant.equals(value.optString("tenantId"))||!current.equals(value.optString("requestId"))||picked==null||picked.length()!=indices.length)throw new Exception();
+                for(int i=0;i<picked.length();i++){JSONObject row=picked.optJSONObject(i),expected=rows.optJSONObject(indices[i]);if(!validRow(row)||expected==null||allPrefix&&!row.optString("loc").split("-",-1)[0].equalsIgnoreCase(scopePrefix))throw new Exception();for(String key:new String[]{"sku","name","spec","store","loc"})if(!row.optString(key).equals(expected.optString(key)))throw new Exception();}
+                for(int i=0;i<picked.length();i++)batchRows.put(picked.getJSONObject(i));batchCursor=indices.length;
+                if(allPrefix&&scopeHasNext){nextScopePage();return;}JSONArray done=batchRows;boolean region=allPrefix;batchIndices=null;batchRows=null;finishControls();status.setText("已直接读取库存响应，共 "+done.length()+" 条，正在生成标签。");if(region)host.onLocationBatchSelected(done);else host.onBatchSelected(done);
+            }catch(Exception error){fail("库存响应已经变化或商品资料不完整，请重新查询。");}
+        });
+        handler.postDelayed(()->{if(current.equals(request)&&busy&&token.equals(selectionToken))fail("库存响应读取超时，请重新查询。");},25000);
+    }
+    private void finishSelection(JSONObject row,boolean inventoryRetained){try{if(row==null||!row.getString("sku").matches("[A-Za-z0-9._-]{1,64}")||row.getString("name").isEmpty()||row.getString("name").length()>200||row.optString("spec").length()>240||row.optString("loc").length()>300)throw new Exception();
+        if(batchIndices!=null){batchRows.put(row);batchCursor++;if(allPrefix&&batchCursor==batchIndices.length&&scopeHasNext){if(inventoryRetained){nextScopePage();return;}batchReturning=true;returningForPage=true;String current=request;qnh.restoreInventory();handler.postDelayed(()->{if(current.equals(request)&&returningForPage)fail("返回区域库存列表超时，请重新查询。");},25000);return;}if(batchCursor<batchIndices.length){String current=request;int step=batchCursor;if(inventoryRetained){handler.post(()->{if(current.equals(request)&&busy&&batchIndices!=null&&batchCursor==step)resolve(batchIndices[step]);});return;}batchReturning=true;qnh.restoreInventory();handler.postDelayed(()->{if(current.equals(request)&&batchReturning&&batchCursor==step)fail("返回库存列表超时，请重新查询。");},25000);return;}JSONArray done=batchRows;boolean region=allPrefix;batchIndices=null;batchRows=null;finishControls();status.setText("已核对 "+done.length()+" 个商品，正在批量生成标签。");if(region)host.onLocationBatchSelected(done);else host.onBatchSelected(done);}else{finishControls();status.setText("已查询并核对商品，标签正在下方生成。");host.onSelected(row);}if(!inventoryRetained)qnh.restoreInventory();
     }catch(Exception error){fail("商品资料不完整，请重新查询。");}}
-    private void finishControls(){request="";busy=false;allPrefix=false;waitingPage=false;returningForPage=false;query.setEnabled(true);results.removeAllViews();pages.setVisibility(GONE);batchBar.setVisibility(GONE);generateScope.setVisibility(GONE);}
+    private void finishControls(){request="";selectionToken="";busy=false;batchReturning=false;batchResuming=false;allPrefix=false;waitingPage=false;returningForPage=false;query.setEnabled(true);results.removeAllViews();pages.setVisibility(GONE);batchBar.setVisibility(GONE);}
     private void updateBatch(){generateBatch.setText("生成所选（"+checked.size()+"张）");generateBatch.setEnabled(!busy&&!checked.isEmpty());}
     private void toggleAll(){if(busy)return;boolean all=checked.size()==Math.min(rows.length(),LabelBatch.MAX_SELECTION);for(int i=0;i<rows.length();i++){CheckBox box=results.findViewWithTag("batch-choice-"+i);if(box!=null)box.setChecked(!all&&i<LabelBatch.MAX_SELECTION);}}
-    private void startBatch(){if(!requireQnhAccess()||busy||request.isEmpty()||checked.isEmpty())return;handler.removeCallbacks(autocomplete);name.dismissDropDown();InputMethodManager keyboard=(InputMethodManager)owner.getSystemService(Context.INPUT_METHOD_SERVICE);if(keyboard!=null)keyboard.hideSoftInputFromWindow(name.getWindowToken(),0);host.onQueryChanged();batchIndices=checked.stream().sorted().mapToInt(Integer::intValue).toArray();batchCursor=0;batchRows=new JSONArray();busy=true;query.setEnabled(false);generateScope.setEnabled(false);generateBatch.setEnabled(false);checkAll.setEnabled(false);for(int i=0;i<rows.length();i++){CheckBox box=results.findViewWithTag("batch-choice-"+i);if(box!=null)box.setEnabled(false);}resolve(batchIndices[0]);}
-    private void startPrefix(){if(!requireQnhAccess()||busy||scopePrefix.isEmpty()||scopePage!=1||request.isEmpty())return;handler.removeCallbacks(autocomplete);name.dismissDropDown();InputMethodManager keyboard=(InputMethodManager)owner.getSystemService(Context.INPUT_METHOD_SERVICE);if(keyboard!=null)keyboard.hideSoftInputFromWindow(name.getWindowToken(),0);host.onQueryChanged();allPrefix=true;batchRows=new JSONArray();busy=true;query.setEnabled(false);generateScope.setEnabled(false);generateBatch.setEnabled(false);checkAll.setEnabled(false);results.setVisibility(GONE);pages.setVisibility(GONE);batchBar.setVisibility(GONE);acceptScopePage(null,true);}
-    private void acceptScopePage(JSONObject value,boolean first){try{if(!first){JSONObject paging=value.optJSONObject("pagination");if(paging==null||paging.optInt("current")!=scopePage+1)throw new Exception();scopePage++;scopeHasNext=paging.optBoolean("next");rows=value.optJSONArray("rows");pageRows=rows;batchReceipt=value.optString("receipt");}if(rows==null||rows.length()==0)throw new Exception();if(batchRows.length()+rows.length()>LabelBatch.MAX_ITEMS){fail("该区域超过500张，请按更细库位分批查询。");return;}for(int i=0;i<rows.length();i++){JSONObject row=rows.optJSONObject(i);if(row==null||!row.optString("loc").split("-",-1)[0].equalsIgnoreCase(scopePrefix))throw new Exception();}waitingPage=false;batchIndices=new int[rows.length()];for(int i=0;i<batchIndices.length;i++)batchIndices[i]=i;batchCursor=0;resolve(batchIndices[0]);}catch(Exception error){fail("区域查询返回的库位或分页信息有变化，请重新查询。");}}
+    private void startBatch(){if(!requireQnhAccess()||busy||request.isEmpty()||checked.isEmpty())return;name.dismissDropDown();InputMethodManager keyboard=(InputMethodManager)owner.getSystemService(Context.INPUT_METHOD_SERVICE);if(keyboard!=null)keyboard.hideSoftInputFromWindow(name.getWindowToken(),0);host.onQueryChanged();batchIndices=checked.stream().sorted().mapToInt(Integer::intValue).toArray();batchCursor=0;batchRows=new JSONArray();busy=true;query.setEnabled(false);generateBatch.setEnabled(false);checkAll.setEnabled(false);for(int i=0;i<rows.length();i++){CheckBox box=results.findViewWithTag("batch-choice-"+i);if(box!=null)box.setEnabled(false);}resolve(batchIndices[0]);}
+    private void rememberPage(JSONObject value){queryFilters=value.optJSONObject("filters");pageRows=value.optJSONArray("pageRows");if(pageRows==null)pageRows=rows;batchReceipt=value.optString("receipt");responsePage="response".equals(value.optString("dataSource"));if(responsePage)responsePages++;else pageFallback=true;}
+    private void startPrefix(){if(!requireQnhAccess()||busy||scopePrefix.isEmpty()||request.isEmpty())return;hideKeyboard();host.onQueryChanged();allPrefix=true;batchRows=new JSONArray();busy=true;query.setEnabled(false);generateBatch.setEnabled(false);checkAll.setEnabled(false);results.setVisibility(GONE);pages.setVisibility(GONE);batchBar.setVisibility(GONE);acceptScopePage(null,true);}
+    private void acceptScopePage(JSONObject value,boolean first){try{if(!first){JSONObject paging=value.optJSONObject("pagination");if(paging==null||paging.optInt("current")!=scopePage+1)throw new Exception();scopePage=paging.optInt("current");scopeHasNext=paging.optBoolean("next");rows=value.optJSONArray("rows");rememberPage(value);}if(rows==null)throw new Exception();if(rows.length()==0){if(scopeHasNext)throw new Exception();JSONArray done=batchRows;finishControls();if(done.length()>0)host.onLocationBatchSelected(done);else status.setText("当前门店未查到该区域的库存记录。");return;}if(batchRows.length()+rows.length()>LabelBatch.MAX_ITEMS){fail("该区域超过500张，请按更细库位分批查询。");return;}for(int i=0;i<rows.length();i++){JSONObject row=rows.optJSONObject(i);if(row==null||!row.optString("loc").split("-",-1)[0].equalsIgnoreCase(scopePrefix))throw new Exception();}waitingPage=false;batchIndices=new int[rows.length()];for(int i=0;i<batchIndices.length;i++)batchIndices[i]=i;batchCursor=0;resolve(batchIndices[0]);}catch(Exception error){fail("区域查询返回的库位或分页信息有变化，请重新查询。");}}
     private void nextScopePage(){String current=String.valueOf(++serial);request=current;displayed="";waitingPage=true;batchIndices=new int[0];qnh.command("window.__kuguanInventory.page("+JSONObject.quote(current)+",1,"+JSONObject.quote(qnh.tenant())+")",ok->{if(current.equals(request)&&!Boolean.TRUE.equals(ok))fail("区域分页未被确认，请重新查询。");});handler.postDelayed(()->{if(current.equals(request)&&waitingPage)fail("区域分页超时，请重新查询。");},30000);}
     private void page(int direction){if(!requireQnhAccess()||busy||request.isEmpty())return;host.onQueryChanged();name.dismissDropDown();busy=true;query.setEnabled(false);String current=String.valueOf(++serial);request=current;displayed="";
         qnh.command("window.__kuguanInventory.page("+JSONObject.quote(current)+","+direction+","+JSONObject.quote(qnh.tenant())+")",ok->{if(current.equals(request)&&!Boolean.TRUE.equals(ok))fail("翻页结果未确认，请重新查询。");});
         handler.postDelayed(()->{if(current.equals(request)&&busy)fail("翻页超时，请重新查询。");},20000);
     }
-    private void openStores(){if(!requireQnhAccess())return;cancel();host.onQueryChanged();storeDepth=0;if(!productReady||!qnh.isInventory()){queuedStores=true;status.setText("正在加载可选门店 / 仓…");qnh.inventory();int waiting=serial;handler.postDelayed(()->{if(queuedStores&&serial==waiting)fail("门店列表加载超时，请检查网络和库存权限。");},20000);return;}qnh.command("window.__kuguanInventory.openStores()",ok->{if(Boolean.TRUE.equals(ok))loadStores(0);else status.setText("门店选项尚未准备好，请稍后重试。");});}
+    private void openStores(){if(!requireQnhAccess())return;cancel();host.onQueryChanged();storeDepth=0;if(!productReady||!qnh.isInventory()||qnh.isLegacyInventory()!=!inputPrefix().isEmpty()){queuedStores=true;status.setText("正在加载可选门店 / 仓…");qnh.inventory(!inputPrefix().isEmpty());int waiting=serial;handler.postDelayed(()->{if(queuedStores&&serial==waiting)fail("门店列表加载超时，请检查网络和库存权限。");},20000);return;}qnh.command("window.__kuguanInventory.openStores()",ok->{if(Boolean.TRUE.equals(ok))loadStores(0);else status.setText("门店选项尚未准备好，请稍后重试。");});}
     private void loadStores(int attempt){if(isFinishing()||!isQnhScreenActive())return;int ticket=serial;qnh.command("window.__kuguanInventory.stores()",result->{if(ticket!=serial||!isQnhScreenActive())return;if(!(result instanceof JSONArray)){status.setText("门店列表暂时不可用。");return;}JSONArray columns=(JSONArray)result;
         if(columns.length()<=storeDepth){if(attempt<15){handler.postDelayed(()->loadStores(attempt+1),400);return;}storeDepth=Math.max(0,columns.length()-1);}
         JSONObject column=columns.optJSONObject(storeDepth);JSONArray options=column==null?null:column.optJSONArray("options");if(options==null||options.length()==0){status.setText("暂无可选门店，请确认牵牛花库存权限。");return;}
@@ -146,5 +207,5 @@ public final class InventorySearchPanel extends LinearLayout {
     });}
     public void paused(){cancel();name.dismissDropDown();if(stores!=null){stores.dismiss();stores=null;}qnh.watchInventory(false);}
     public void destroy(){handler.removeCallbacksAndMessages(null);if(stores!=null)stores.dismiss();}
-    public void saveState(Bundle out){out.putString("query-text",name.getText().toString());}
+    public void saveState(Bundle out){out.putString("query-text",name.getText().toString());out.putString("query-scan-filter",scanFilter);}
 }

@@ -30,7 +30,8 @@ import java.nio.charset.StandardCharsets;
 /** One lazy on-device browser, cached static assets and one runtime injection per document. */
 public final class QnhConnection {
     public static final String INVENTORY="https://qnh.meituan.com/#/co-wms/inventory-query-integration/list?tab=goodsBatch";
-    public interface Listener {void onQnhSnapshot(JSONObject value);void onQnhMessage(String message);default void onQnhPageProgress(int progress){}}
+    public static final String LEGACY_INVENTORY="https://qnh.meituan.com/home.html#/co-wms/non-erp/stock-query?tab=list&pageSize=50";
+    public interface Listener {void onQnhSnapshot(JSONObject value);void onQnhMessage(String message);default void onQnhPageProgress(int progress){}default void onQnhLoginStage(String stage){}}
     public interface Result {void accept(Object value);}
     private static QnhConnection instance;
     public static synchronized QnhConnection get(Context context){if(instance==null)instance=new QnhConnection(context.getApplicationContext());return instance;}
@@ -41,7 +42,7 @@ public final class QnhConnection {
     private WebView web;
     private Listener listener;
     private Activity owner;
-    private String runtime="",lastInventory=INVENTORY;
+    private String runtime="",loginRuntime="",lastInventory=INVENTORY,lastNewInventory=INVENTORY,lastLegacyInventory=LEGACY_INVENTORY;private boolean loginProbing=false;
     private int navigation=0;
     private int restoreTicket=0;private boolean restoring=false;
     private boolean active=false,ready=false,probing=false,loaded=false,injected=false,loginVisible=false,inventoryInterest=false,pending=false,loginRequired=false;
@@ -50,6 +51,7 @@ public final class QnhConnection {
     private final Runnable tick=new Runnable(){public void run(){if(!active)return;probe();handler.postDelayed(this,QnhPolling.interval(loginVisible||!gate.verified(),inventoryInterest,pending||SystemClock.elapsedRealtime()<burstUntil));}};
     private QnhConnection(Context application){app=application;context=new MutableContextWrapper(app);
         try(InputStream input=app.getAssets().open("inventory.js")){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[8192];int n;while((n=input.read(buffer))!=-1){if(out.size()+n>350000)throw new Exception();out.write(buffer,0,n);}runtime=out.toString(StandardCharsets.UTF_8.name());}catch(Exception ignored){}
+        try(InputStream input=app.getAssets().open("login.js")){ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] buffer=new byte[4096];int n;while((n=input.read(buffer))!=-1){if(out.size()+n>50000)throw new Exception();out.write(buffer,0,n);}loginRuntime=out.toString(StandardCharsets.UTF_8.name());}catch(Exception ignored){}
     }
     @SuppressLint("SetJavaScriptEnabled") private void ensureBrowser(){if(web!=null)return;
         web=new WebView(context){
@@ -59,8 +61,8 @@ public final class QnhConnection {
         };web.setAlpha(0f);WebView.setWebContentsDebuggingEnabled(false);WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(false);settings.setAllowContentAccess(false);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);settings.setSaveFormData(false);settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setSupportZoom(true);settings.setBuiltInZoomControls(true);settings.setDisplayZoomControls(false);settings.setUseWideViewPort(true);settings.setLoadWithOverviewMode(true);settings.setMediaPlaybackRequiresUserGesture(true);
-        java.util.regex.Matcher version=java.util.regex.Pattern.compile("Chrome/([0-9.]+)").matcher(settings.getUserAgentString());String chrome=version.find()?version.group(1):"120.0.0.0";
-        settings.setUserAgentString("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/"+chrome+" Safari/537.36");
+        // Match the working procurement app: preserve the normal Android WebView
+        // user agent so official authentication can choose its mobile layout.
         CookieManager.getInstance().setAcceptCookie(true);CookieManager.getInstance().setAcceptThirdPartyCookies(web,true);
         web.setWebChromeClient(new WebChromeClient(){@Override public void onProgressChanged(WebView view,int progress){if(view==web&&loginVisible&&listener!=null)listener.onQnhPageProgress(progress);}@Override public void onPermissionRequest(PermissionRequest request){request.deny();}
             @Override public boolean onCreateWindow(WebView view,boolean dialog,boolean gesture,android.os.Message result){return false;}
@@ -68,8 +70,8 @@ public final class QnhConnection {
         });
         web.setWebViewClient(new WebViewClient(){
             @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request){if(!request.isForMainFrame())return false;boolean allowed=QnhUrlPolicy.allowedTop(request.getUrl().toString());if(!allowed)message("已停止打开官方登录站点以外的地址。");return !allowed;}
-            @Override public void onPageStarted(WebView view,String url,Bitmap icon){if(view!=web)return;navigation++;ready=false;probing=false;injected=false;if(!QnhUrlPolicy.qnhOrigin(url)){gate.clear();loginRequired=true;notifyLocked();}}
-            @Override public void onPageFinished(WebView view,String url){if(view!=web)return;ready=true;probing=false;kick();}
+            @Override public void onPageStarted(WebView view,String url,Bitmap icon){if(view!=web)return;navigation++;ready=false;probing=false;injected=false;gate.clear();loginProbing=false;if(loginVisible){web.setAlpha(0f);if(listener!=null)listener.onQnhLoginStage("loading");}loginRequired=!QnhUrlPolicy.qnhOrigin(url);if(loginRequired){restoreTicket++;restoring=false;}notifyLocked();}
+            @Override public void onPageFinished(WebView view,String url){if(view!=web||!QnhUrlPolicy.sameDocument(url,view.getUrl()))return;ready=true;probing=false;kick();}
             @Override public void onReceivedSslError(WebView view,SslErrorHandler ssl,SslError error){ssl.cancel();if(view!=web)return;gate.clear();ready=false;notifyLocked();message("网站证书校验失败，请检查手机时间和网络。");}
             @Override public void onReceivedError(WebView view,WebResourceRequest request,WebResourceError error){if(view==web&&request.isForMainFrame()){gate.clear();ready=false;notifyLocked();message("牵牛花页面加载失败，请检查网络后重新加载。");}}
         });
@@ -85,7 +87,7 @@ public final class QnhConnection {
         web.getSettings().setLoadsImagesAutomatically(visible);web.getSettings().setBlockNetworkImage(!visible);
         // Keep the SPA rendering: INVISIBLE can suspend its animation-frame updates.
         // Transparency also prevents a frame from flashing through if the browser requests focus or changes Z order.
-        web.setVisibility(View.VISIBLE);web.setAlpha(visible?1f:0f);web.setFocusable(visible);web.setFocusableInTouchMode(visible);web.setImportantForAccessibility(visible?View.IMPORTANT_FOR_ACCESSIBILITY_AUTO:View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        web.setVisibility(View.VISIBLE);web.setAlpha(0f);web.getSettings().setUseWideViewPort(true);web.getSettings().setLoadWithOverviewMode(true);web.setFocusable(visible);web.setFocusableInTouchMode(visible);web.setImportantForAccessibility(visible?View.IMPORTANT_FOR_ACCESSIBILITY_AUTO:View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         host.addView(web,0,new FrameLayout.LayoutParams(-1,-1));web.resumeTimers();web.onResume();kick();
     }
     public void releaseHost(Activity activity){if(owner==activity){if(web!=null){web.setAlpha(0f);if(web.getParent() instanceof ViewGroup)((ViewGroup)web.getParent()).removeView(web);}owner=null;context.setBaseContext(app);}}
@@ -95,14 +97,21 @@ public final class QnhConnection {
     }
     public void trimMemory(int level){if(!active&&(level==ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW||level==ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL||level>=ComponentCallbacks2.TRIM_MEMORY_BACKGROUND))releaseBrowser();}
     private void releaseBrowser(){if(active||web==null)return;WebView old=web;web=null;navigation++;ready=false;loaded=false;injected=false;probing=false;gate.clear();if(old.getParent() instanceof ViewGroup)((ViewGroup)old.getParent()).removeView(old);old.stopLoading();old.destroy();owner=null;context.setBaseContext(app);}
-    public void freshLogin(){restoreTicket++;restoring=false;ensureBrowser();gate.clear();ready=false;probing=false;loaded=true;injected=false;lastInventory=INVENTORY;web.loadUrl(INVENTORY);kick();}
+    public void freshLogin(){restoreTicket++;restoring=false;ensureBrowser();gate.clear();ready=false;probing=false;loaded=true;injected=false;lastInventory=INVENTORY;lastNewInventory=INVENTORY;lastLegacyInventory=LEGACY_INVENTORY;web.loadUrl(INVENTORY);kick();}
     public void loginPage(){ensureBrowser();if(!loaded){loaded=true;web.loadUrl(INVENTORY);}kick();}
     public boolean loginZoom(boolean larger){return loginVisible&&web!=null&&(larger?web.zoomIn():web.zoomOut());}
-    public void signOut(Runnable done){gate.clear();loginRequired=true;ready=false;navigation++;probing=false;lastInventory=INVENTORY;if(web!=null)web.stopLoading();CookieManager.getInstance().removeAllCookies(ignored->{CookieManager.getInstance().flush();android.webkit.WebStorage.getInstance().deleteAllData();done.run();});}
-    public void inventory(){restoreTicket++;restoring=false;ensureBrowser();if(!loaded||!isInventory()){loaded=true;web.loadUrl(lastInventory);}kick();}
+    public void signOut(Runnable done){gate.clear();loginRequired=true;ready=false;navigation++;probing=false;lastInventory=INVENTORY;lastNewInventory=INVENTORY;lastLegacyInventory=LEGACY_INVENTORY;if(web!=null)web.stopLoading();CookieManager.getInstance().removeAllCookies(ignored->{CookieManager.getInstance().flush();android.webkit.WebStorage.getInstance().deleteAllData();done.run();});}
+    public void inventory(){inventory(false);}
+    public void inventory(boolean legacy){restoreTicket++;restoring=false;ensureBrowser();String target=legacy?lastLegacyInventory:lastNewInventory;
+        // Carry only the official selected store scope between the two inventory pages.
+        String source=isInventory()?web.getUrl():lastInventory;
+        if(isInventoryUrl(source)&&legacyInventoryUrl(source)!=legacy)try{String sourceFragment=android.net.Uri.parse(source).getFragment(),targetFragment=android.net.Uri.parse(target).getFragment();android.net.Uri sourceScope=android.net.Uri.parse("https://qnh.meituan.com/?"+sourceFragment.substring(sourceFragment.indexOf('?')+1)),targetScope=android.net.Uri.parse("https://qnh.meituan.com/?"+targetFragment.substring(targetFragment.indexOf('?')+1));android.net.Uri.Builder params=new android.net.Uri.Builder();for(String key:targetScope.getQueryParameterNames())if(!key.equals("repositoryList")&&!key.equals("queryPoiType"))for(String value:targetScope.getQueryParameters(key))params.appendQueryParameter(key,value);for(String key:new String[]{"repositoryList","queryPoiType"}){String value=sourceScope.getQueryParameter(key);if(value!=null)params.appendQueryParameter(key,value);}target=target.substring(0,target.indexOf('?')+1)+params.build().getEncodedQuery();}catch(Exception ignored){}
+        if(!loaded||!isInventory()||isLegacyInventory()!=legacy){loaded=true;web.loadUrl(target);}kick();}
     public boolean isInventory(){return web!=null&&isInventoryUrl(web.getUrl());}
-    private static boolean isInventoryUrl(String value){try{android.net.Uri uri=android.net.Uri.parse(value);String fragment=uri.getFragment();return QnhUrlPolicy.qnhOrigin(value)&&fragment!=null&&fragment.startsWith("/co-wms/inventory-query-integration/list?")&&("&"+fragment.substring(fragment.indexOf('?')+1)+"&").contains("&tab=goodsBatch&");}catch(Exception ignored){return false;}}
-    public void restoreInventory(){if(!verified()||web==null)return;restoring=true;int ticket=++restoreTicket;String target=lastInventory;android.webkit.WebBackForwardList history=web.copyBackForwardList();int index=history.getCurrentIndex();if(!isInventory()){if(index>0&&target.equals(history.getItemAtIndex(index-1).getUrl()))web.goBack();else web.loadUrl(target);}kick();handler.postDelayed(()->{if(ticket!=restoreTicket||!restoring||web==null||!active||loginVisible)return;if(target.equals(web.getUrl()))web.reload();else{web.loadUrl(target);handler.postDelayed(()->{if(ticket==restoreTicket&&restoring&&web!=null&&active&&!loginVisible&&target.equals(web.getUrl()))web.reload();},500);}kick();},1500);}
+    public boolean isLegacyInventory(){return web!=null&&legacyInventoryUrl(web.getUrl());}
+    private static boolean legacyInventoryUrl(String value){try{android.net.Uri uri=android.net.Uri.parse(value);String fragment=uri.getFragment();if(!QnhUrlPolicy.qnhOrigin(value)||fragment==null)return false;String[] parts=fragment.split("\\?",2);if(!parts[0].equals("/co-wms/non-erp/stock-query"))return false;String tab=parts.length==1?null:android.net.Uri.parse("https://qnh.meituan.com/?"+parts[1]).getQueryParameter("tab");return tab==null||tab.equals("list");}catch(Exception ignored){return false;}}
+    private static boolean isInventoryUrl(String value){if(legacyInventoryUrl(value))return true;try{android.net.Uri uri=android.net.Uri.parse(value);String fragment=uri.getFragment();return QnhUrlPolicy.qnhOrigin(value)&&fragment!=null&&fragment.startsWith("/co-wms/inventory-query-integration/list?")&&("&"+fragment.substring(fragment.indexOf('?')+1)+"&").contains("&tab=goodsBatch&");}catch(Exception ignored){return false;}}
+    public void restoreInventory(){if(!verified()||web==null)return;restoring=true;int ticket=++restoreTicket;String target=lastInventory;if(!target.equals(web.getUrl()))web.loadUrl(target);kick();handler.postDelayed(()->{if(ticket!=restoreTicket||!restoring||web==null||!active||loginVisible)return;if(target.equals(web.getUrl()))web.reload();else{web.loadUrl(target);handler.postDelayed(()->{if(ticket==restoreTicket&&restoring&&web!=null&&active&&!loginVisible&&target.equals(web.getUrl()))web.reload();},500);}kick();},1500);}
     public void watchInventory(boolean value){inventoryInterest=value;kick();}
     private void kick(){if(!active)return;handler.removeCallbacks(tick);handler.post(tick);}
     private String prefix(){return injected?"":runtime+";";}
@@ -110,11 +119,13 @@ public final class QnhConnection {
         int page=navigation;burstUntil=SystemClock.elapsedRealtime()+1800;
         web.evaluateJavascript(prefix()+"JSON.stringify("+expression+");",raw->{if(page!=navigation||!active){if(callback!=null)callback.accept(null);return;}Object decoded=decode(raw);if(decoded!=null)injected=true;if(callback!=null)callback.accept(decoded);kick();});
     }
-    private static Object decode(String raw){try{if(raw==null||raw.length()>180000)return null;Object outer=new org.json.JSONTokener(raw).nextValue();return outer instanceof String?new org.json.JSONTokener((String)outer).nextValue():null;}catch(Exception ignored){return null;}}
-    private void probe(){if(!active||!ready||probing||web==null||!QnhUrlPolicy.qnhOrigin(web.getUrl())||runtime.isEmpty())return;probing=true;int page=navigation;boolean details=inventoryInterest&&!loginVisible;
-        web.evaluateJavascript(prefix()+"JSON.stringify(window.__kuguanInventory.inspect("+details+"));",raw->{if(page!=navigation||!active)return;probing=false;Object value=decode(raw);if(!(value instanceof JSONObject)){gate.clear();notifyLocked();return;}
-            injected=true;JSONObject snapshot=(JSONObject)value;loginRequired="login_required".equals(snapshot.optString("authState"));gate.observe(snapshot.optBoolean("authorized"),snapshot.optString("tenantId"));String phase=snapshot.optString("status");pending="pending".equals(phase)||"resolving".equals(phase);if(restoring&&snapshot.optBoolean("productReady")){restoring=false;restoreTicket++;}
-            if(gate.verified()&&isInventory())lastInventory=web.getUrl();if(listener!=null)listener.onQnhSnapshot(snapshot);
+    private static Object decode(String raw){try{if(raw==null||raw.length()>1500000)return null;Object outer=new org.json.JSONTokener(raw).nextValue();return outer instanceof String?new org.json.JSONTokener((String)outer).nextValue():null;}catch(Exception ignored){return null;}}
+    private void loginPresentation(){if(!loginVisible||!ready||web==null||loginProbing||loginRuntime.isEmpty()||!QnhUrlPolicy.allowedTop(web.getUrl()))return;loginProbing=true;int page=navigation;web.evaluateJavascript(loginRuntime+";JSON.stringify(window.__kuguanLoginView?window.__kuguanLoginView.inspect():null);",raw->{loginProbing=false;if(page!=navigation||!loginVisible||web==null)return;Object decoded=decode(raw);if(!(decoded instanceof JSONObject))return;JSONObject value=(JSONObject)decoded;if(!QnhUrlPolicy.sameDocument(value.optString("documentUrl"),web.getUrl()))return;String stage=value.optString("stage");web.setAlpha("login".equals(stage)?1f:0f);if(listener!=null)listener.onQnhLoginStage(stage);});}
+    private void probe(){loginPresentation();if(!active||!ready||probing||web==null||!QnhUrlPolicy.qnhOrigin(web.getUrl())||runtime.isEmpty())return;probing=true;int page=navigation;boolean details=inventoryInterest&&!loginVisible;
+        web.evaluateJavascript(prefix()+"JSON.stringify({documentUrl:location.href,snapshot:window.__kuguanInventory.inspect("+details+")});",raw->{if(page!=navigation||!active)return;probing=false;Object value=decode(raw);if(!(value instanceof JSONObject)){gate.clear();notifyLocked();return;}
+            JSONObject envelope=(JSONObject)value;if(!QnhUrlPolicy.sameDocument(envelope.optString("documentUrl"),web.getUrl()))return;JSONObject snapshot=envelope.optJSONObject("snapshot");if(snapshot==null){gate.clear();notifyLocked();return;}
+            injected=true;loginRequired="login_required".equals(snapshot.optString("authState"));gate.observe(snapshot.optBoolean("authorized"),snapshot.optString("tenantId"));String phase=snapshot.optString("status");pending="pending".equals(phase)||"resolving".equals(phase);if(restoring&&snapshot.optBoolean("productReady")){restoring=false;restoreTicket++;}
+            if(gate.verified()&&isInventory()){lastInventory=web.getUrl();if(isLegacyInventory())lastLegacyInventory=lastInventory;else lastNewInventory=lastInventory;}if(listener!=null)listener.onQnhSnapshot(snapshot);
         });
     }
     private void notifyLocked(){if(listener!=null)listener.onQnhSnapshot(new JSONObject());}

@@ -22,4 +22,9 @@ final class QnhUrlPolicy {
             && uri.getPort() == -1 && uri.getRawUserInfo() == null && uri.getRawQuery() == null && uri.getRawFragment() == null; }
         catch (Exception ignored) { return false; }
     }
+    static boolean sameDocument(String first,String second) {
+        if(first==null||second==null||!allowedTop(first)||!allowedTop(second))return false;
+        // Hash changes are SPA navigation; an origin/path/query change is a new document.
+        return first.split("#",2)[0].equals(second.split("#",2)[0]);
+    }
 }
