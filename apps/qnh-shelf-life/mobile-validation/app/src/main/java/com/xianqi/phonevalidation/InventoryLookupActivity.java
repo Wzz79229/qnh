@@ -11,6 +11,8 @@ import android.net.http.SslError;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.webkit.CookieManager;
 import android.webkit.PermissionRequest;
 import android.webkit.SslErrorHandler;
@@ -52,7 +54,18 @@ public final class InventoryLookupActivity extends Activity {
         sku=new EditText(this);sku.setHint("完整 SKU 编码");sku.setSingleLine(true);sku.setInputType(android.text.InputType.TYPE_CLASS_TEXT|android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);sku.setAutofillHints((String[])null);root.addView(sku);
         LinearLayout actions=new LinearLayout(this);query=new Button(this);query.setText("查询 SKU");query.setOnClickListener(v->begin());actions.addView(query,new LinearLayout.LayoutParams(0,dp(48),1));
         Button inventory=new Button(this);inventory.setText("选择门店/仓");inventory.setOnClickListener(v->{fail("");web.loadUrl(INVENTORY);});actions.addView(inventory,new LinearLayout.LayoutParams(0,dp(48),1));root.addView(actions);
-        web=new WebView(this);root.addView(web,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);configure();web.loadUrl(INVENTORY);
+        web=new WebView(this);root.addView(web,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);configure();
+        sku.addTextChangedListener(new TextWatcher(){
+            public void beforeTextChanged(CharSequence value,int start,int count,int after){}
+            public void afterTextChanged(Editable value){}
+            public void onTextChanged(CharSequence value,int start,int before,int count){
+                boolean hadResult=!pending.isEmpty() || selection!=null;
+                fail("");if(selection!=null){selection.dismiss();selection=null;}
+                if(ready && QnhUrlPolicy.qnhOrigin(web.getUrl()))web.evaluateJavascript("window.__kuguanInventory && window.__kuguanInventory.cancel();",null);
+                if(hadResult)status.setText("SKU 已修改，请重新查询。");
+            }
+        });
+        web.loadUrl(INVENTORY);
     }
     @SuppressLint("SetJavaScriptEnabled") private void configure(){
         WebView.setWebContentsDebuggingEnabled(false);WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);
