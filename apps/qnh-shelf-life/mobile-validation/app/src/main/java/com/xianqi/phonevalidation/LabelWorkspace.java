@@ -23,6 +23,7 @@ public final class LabelWorkspace extends FrameLayout {
     private final Activity activity;
     private final LinearLayout body,previewCard,placeholder;
     private final TextView productName,spec,sku,location,store,status;
+    private final TextView placeholderTitle,placeholderText;
     private final ScrollView scroll;
     private boolean wide=false;
     private int dp(int n){return WarehouseUi.dp(activity,n);}
@@ -43,7 +44,7 @@ public final class LabelWorkspace extends FrameLayout {
         previewCard=WarehouseUi.card(activity);LinearLayout top=new LinearLayout(activity);top.setGravity(Gravity.CENTER_VERTICAL);top.addView(WarehouseUi.text(activity,"标签预览",18,WarehouseUi.INK,true),new LinearLayout.LayoutParams(0,-2,1));top.addView(WarehouseUi.text(activity,"80 × 60 mm",12,WarehouseUi.MUTED,false));previewCard.addView(top);WarehouseUi.space(previewCard,12);
         placeholder=new LinearLayout(activity);placeholder.setOrientation(LinearLayout.VERTICAL);placeholder.setGravity(Gravity.CENTER);placeholder.setPadding(dp(16),dp(28),dp(16),dp(28));placeholder.setBackground(WarehouseUi.shape(activity,WarehouseUi.BG,WarehouseUi.LINE,12));
         ImageView icon=new ImageView(activity);icon.setImageResource(R.mipmap.ic_launcher);icon.setAlpha(.65f);placeholder.addView(icon,new LinearLayout.LayoutParams(dp(46),dp(46)));WarehouseUi.space(placeholder,12);
-        placeholder.addView(WarehouseUi.text(activity,"查询商品后自动生成",15,WarehouseUi.INK,true));WarehouseUi.space(placeholder,6);placeholder.addView(WarehouseUi.text(activity,"无需填写商品资料或点击生成",12,WarehouseUi.MUTED,false));previewCard.addView(placeholder);
+        placeholderTitle=WarehouseUi.text(activity,"查询商品后自动生成",15,WarehouseUi.INK,true);placeholder.addView(placeholderTitle);WarehouseUi.space(placeholder,6);placeholderText=WarehouseUi.text(activity,"无需填写商品资料或点击生成",12,WarehouseUi.MUTED,false);placeholder.addView(placeholderText);previewCard.addView(placeholder);
         preview=new ImageView(activity);preview.setAdjustViewBounds(true);preview.setScaleType(ImageView.ScaleType.FIT_CENTER);preview.setContentDescription("80×60毫米库位标签预览");preview.setVisibility(GONE);previewCard.addView(preview,new LinearLayout.LayoutParams(-1,-2));WarehouseUi.space(previewCard,12);
         status=WarehouseUi.text(activity,"300 DPI PNG · 完整 SKU 条码",12,WarehouseUi.MUTED,false);previewCard.addView(status);WarehouseUi.space(previewCard,14);
         LinearLayout exports=new LinearLayout(activity);save=WarehouseUi.button(activity,"保存图片",true,v->actions.save());share=WarehouseUi.button(activity,"分享",false,v->actions.share());print=WarehouseUi.button(activity,"打印",false,v->actions.print());
@@ -56,8 +57,9 @@ public final class LabelWorkspace extends FrameLayout {
     }
     @Override protected void onSizeChanged(int w,int h,int oldw,int oldh){super.onSizeChanged(w,h,oldw,oldh);boolean next=w>=dp(720);if(next!=wide&&body!=null)post(()->arrange(next));}
     public void showRecord(LabelContent data,String source){productName.setText(data.name);spec.setText("规格  "+(data.spec.isEmpty()?"未设置":data.spec));sku.setText("SKU  "+data.sku);location.setText("库位  "+data.location);store.setText(source);productCard.setVisibility(VISIBLE);}
-    public void clear(){productCard.setVisibility(GONE);preview.setImageDrawable(null);preview.setVisibility(GONE);placeholder.setVisibility(VISIBLE);setActions(false);status.setText("300 DPI PNG · 完整 SKU 条码");}
-    public void rendering(){preview.setImageDrawable(null);preview.setVisibility(GONE);placeholder.setVisibility(VISIBLE);setActions(false);status.setText("正在本机生成标签…");}
+    public void clear(){productCard.setVisibility(GONE);preview.setImageDrawable(null);preview.setVisibility(GONE);placeholder.setVisibility(VISIBLE);placeholderTitle.setText("查询商品后自动生成");placeholderText.setText("无需填写商品资料或点击生成");setActions(false);status.setText("300 DPI PNG · 完整 SKU 条码");}
+    public void rendering(){preview.setImageDrawable(null);preview.setVisibility(GONE);placeholder.setVisibility(VISIBLE);placeholderTitle.setText("正在生成标签");placeholderText.setText("正在本机排版，请稍候");setActions(false);status.setText("正在本机生成标签…");}
+    public void failed(String message){preview.setImageDrawable(null);preview.setVisibility(GONE);placeholder.setVisibility(VISIBLE);placeholderTitle.setText("标签未能生成");placeholderText.setText("商品已查到，请查看下方原因");setActions(false);status.setText(message);search.message("商品查询成功，标签生成失败，请查看下方原因。");}
     public void showImage(Bitmap image){preview.setImageBitmap(image);preview.setVisibility(VISIBLE);placeholder.setVisibility(GONE);setActions(true);status.setText("已自动生成 · 945 × 709 px · 300 DPI");}
     public void message(String value){status.setText(value);}
     public void setActions(boolean enabled){save.setEnabled(enabled);share.setEnabled(enabled);print.setEnabled(enabled);}

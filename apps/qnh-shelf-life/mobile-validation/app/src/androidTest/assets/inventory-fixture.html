@@ -2,7 +2,7 @@
 <div class="saas-platform-layout-wrapper"><nav class="top-nav-base"><span class="SearchLeftTenantId--fixture">（租户ID: 777）</span></nav><main class="saas-platform-layout-main"></main></div>
 <script>
 const main=document.querySelector('main'),header=document.querySelector('.SearchLeftTenantId--fixture');
-const products=[{name:'合成测试饮用水',spec:'500ml/瓶',sku:'2110000000000123456',loc:'A64-6-4'},{name:'合成测试饮用水',spec:'1L/瓶',sku:'2110000000000123457',loc:'A65-1-2'}];
+const products=[{name:'合成测试饮用水',spec:'500ml/瓶',sku:'2110000000000123456',loc:'A64-6-4'},{name:'合成测试饮用水',spec:'1L/瓶',sku:'2110000000000123457',loc:'A65-1-2'},{name:'【规格可选】示例泡沫地垫 厚1cm 儿童爬行垫 加厚拼接地板垫 1片/份',spec:'白色30×30cm',sku:'2110000000000198822',loc:'A10-1-1'}];
 const fields={name:'skuNameKeyword',sku:'skuIdListStr',barcode:'upcKeyword',external:'externalGoodsCodeKeyword'};
 function rows(list){return list.length?list.map((p,i)=>'<tr><td><div class="wms-wand-goods-info"><span class="wms-wand-goods-info-goods-name-text">'+p.name+'</span><div>规格：'+p.spec+'</div></div></td><td>合成测试仓(12345)</td><td>'+p.loc+'</td><td><a href="#" data-sku="'+p.sku+'">查询流水</a></td></tr>').join(''):'<tr class="wms-ant-table-placeholder"><td><div class="wms-ant-empty">暂无数据</div></td></tr>';}
 function filter(q){return products.filter(p=>(!q.get(fields.sku)||q.get(fields.sku)===p.sku)&&(!q.get(fields.name)||p.name.includes(q.get(fields.name)))&&(!q.getAll('locationCodeSegmentList')[0]||p.loc.startsWith(q.getAll('locationCodeSegmentList').filter(Boolean).join('-'))));}

@@ -60,10 +60,10 @@ public final class LocationLabelActivity extends QnhProtectedActivity implements
             renderJob=renderer.submit(()->{
                 Bitmap next=null;
                 try{next=LocationLabelRenderer.render(content);byte[] encoded=LocationLabelRenderer.png(next);final Bitmap image=next;
-                    runOnUiThread(()->{if(destroyed||!selection.current(ticket,tenant)){image.recycle();return;}bitmap=image;png=encoded;ui.showImage(image);});
-                }catch(Exception error){if(next!=null&&!next.isRecycled())next.recycle();final String message=error instanceof IllegalArgumentException?error.getMessage():"图片生成未完成，请重新查询后重试。";runOnUiThread(()->{if(!destroyed&&selection.current(ticket,tenant))ui.message(message);});}
+                    runOnUiThread(()->{if(destroyed||!selection.current(ticket,tenant)){image.recycle();return;}bitmap=image;png=encoded;ui.showImage(image);ui.search.message("标签已生成，可保存、分享或打印。");});
+                }catch(Exception error){if(next!=null&&!next.isRecycled())next.recycle();final String message=error instanceof IllegalArgumentException?error.getMessage():"图片生成未完成，请重新查询后重试。";runOnUiThread(()->{if(!destroyed&&selection.current(ticket,tenant))ui.failed(message);});}
             });
-        }catch(Exception error){ui.message(error instanceof IllegalArgumentException?error.getMessage():"查询返回的商品资料不完整，请重新查询。");}
+        }catch(Exception error){ui.failed(error instanceof IllegalArgumentException?error.getMessage():"查询返回的商品资料不完整，请重新查询。");}
     }
     @Override protected void onAuthenticated(){
         ui.search.authenticated();

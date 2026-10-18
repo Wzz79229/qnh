@@ -41,6 +41,7 @@ final class LocationLabelRenderer {
     private Bitmap draw(LabelContent data) {
         float left=mm(2.5f), width=targetWidth-left*2, gap=mm(1), barcodeWidth=mm(52), barcodeHeight=mm(8);
         Paint namePaint=paint(11,false), specPaint=paint(15,false), skuPaint=paint(18,false);
+        skuPaint.setTypeface(Typeface.create(Typeface.MONOSPACE,Typeface.BOLD));
         List<String> names=wrap(data.name,namePaint,width), specs=wrap("规格："+data.spec,specPaint,width);
         float nameLine=pt(11)+mm(2), specLine=pt(15)+mm(2), padding=mm(4), locSize=54;
         float fixed=names.size()*nameLine+specs.size()*specLine+barcodeHeight+gap*(specs.isEmpty()?2:3);
@@ -48,8 +49,11 @@ final class LocationLabelRenderer {
         Paint locPaint=paint(locSize,true);
         while(locSize>16 && (locPaint.measureText(data.location)>width || fixed+pt(locSize)+padding*2>targetHeight)) { locSize-=.5f; locPaint.setTextSize(pt(locSize)); }
         if(locPaint.measureText(data.location)>width || fixed+pt(locSize)+padding*2>targetHeight) throw new IllegalArgumentException("商品资料超过标签可容纳范围，请在牵牛花维护资料后重新查询。");
-        float skuWidth=width-barcodeWidth-gap, skuScale=Math.min(1,skuWidth/skuPaint.measureText(data.skuCaption()));
-        if(skuScale<.6f) throw new IllegalArgumentException("SKU 文字无法清晰排入标签，请核对编码。");
+        float skuWidth=width-barcodeWidth-gap;
+        LabelCaptionLayout.Plan caption=LabelCaptionLayout.fit(data.skuCaption(),skuWidth,barcodeHeight,new LabelCaptionLayout.Metrics(){
+            public float width(String text,float points){skuPaint.setTextSize(pt(points));return skuPaint.measureText(text);}
+            public float height(float points){skuPaint.setTextSize(pt(points));Paint.FontMetrics metrics=skuPaint.getFontMetrics();return metrics.descent-metrics.ascent;}
+        });skuPaint.setTextSize(pt(caption.points));
         Bitmap bitmap=Bitmap.createBitmap(targetWidth,targetHeight,Bitmap.Config.RGB_565); bitmap.setDensity(Math.round(resolution)); Canvas c=new Canvas(bitmap); c.drawColor(Color.WHITE);
         float y=(targetHeight-fixed-pt(locSize))/2;
         for(int i=0;i<names.size();i++) { String line=names.get(i);
@@ -57,7 +61,8 @@ final class LocationLabelRenderer {
         } y+=gap;
         if(!specs.isEmpty()) { for(String line:specs) { center(c,line,left,y,width,specLine,specPaint,true); y+=specLine; } y+=gap; }
         Paint.FontMetrics skuMetrics=skuPaint.getFontMetrics();
-        c.save(); c.translate(left,y+(barcodeHeight-skuMetrics.descent-skuMetrics.ascent)/2); c.scale(skuScale,1); c.drawText(data.skuCaption(),0,0,skuPaint); c.restore();
+        float captionLine=skuMetrics.descent-skuMetrics.ascent,baseline=y+(barcodeHeight-captionLine*caption.lines.length)/2-skuMetrics.ascent;
+        for(String line:caption.lines){c.drawText(line,left,baseline,skuPaint);baseline+=captionLine;}
         boolean[] bits=data.barcode(); int module=(int)(barcodeWidth/(bits.length+20));
         if(module<2)throw new IllegalArgumentException("当前打印分辨率无法清晰显示该SKU条码。");
         float barcodeLeft=left+width-barcodeWidth+(barcodeWidth-bits.length*module)/2;
